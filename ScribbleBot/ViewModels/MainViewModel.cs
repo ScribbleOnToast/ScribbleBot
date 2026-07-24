@@ -50,5 +50,11 @@ namespace ScribbleBot.ViewModels
         {
             await _supervisorAgent.SwitchThreadAsync(thread);
         }
+
+        [RelayCommand]
+        private void ToggleSidebar()
+        {
+            State.IsSidebarOpen = !State.IsSidebarOpen;
+        }
     }
 }

@@ -26,6 +26,9 @@ public partial class AgentState : ObservableObject
     [ObservableProperty]
     private ObservableCollection<ChatMessageModel> _activeMessages = [];
 
+    [ObservableProperty]
+    private bool _isSidebarOpen;
+
     // Conversation history passed across calls
     public ObservableCollection<ChatMessage> Messages { get; } = new();
 

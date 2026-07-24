@@ -11,42 +11,167 @@
         Background="#1E1E1E" Foreground="#F1F1F1">
 
     <Window.Resources>
-        <!-- Register the "Bubble Stlye" converter -->
-        <localConverters:MessageStyleConverter  x:Key="StyleConv"/>
+        <localConverters:MessageStyleConverter x:Key="StyleConv"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVisConv"/>
     </Window.Resources>
     
-    <Grid Margin="15">
-        <Grid.RowDefinitions>
-            <!-- Header/Status Bar -->
-            <RowDefinition Height="Auto"/>
-            <!-- Chat Message List -->
-            <RowDefinition Height="*"/>
-            <!-- User Input Area -->
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <!-- Root Overlay Container -->
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <!-- Column 0: Sidebar (Width controlled dynamically) -->
+            <ColumnDefinition x:Name="SidebarColumn" Width="Auto" />
+            <!-- Column 1: Main Content (Fills remaining window space) -->
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <!-- Status Header Bar -->
-        <Border Grid.Row="0" Background="#2D2D30" Padding="10,8" CornerRadius="4" Margin="0,0,0,10">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="Status: " FontWeight="Bold" Foreground="#888888"/>
-                <TextBlock Text="{Binding State.StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
-            </StackPanel>
+        <!-- 1. SIDEBAR PANEL (Column 0) -->
+        <Border Grid.Column="0" 
+            Background="#252526" 
+            BorderBrush="#3F3F46" 
+            BorderThickness="0,0,1,0" 
+            Width="260"
+            Padding="12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <!-- New Thread Button -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Search Chats Button -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Separator -->
+                    <RowDefinition Height="*"/>
+                    <!-- Threads List -->
+                </Grid.RowDefinitions>
+
+                <!-- New Thread Button -->
+                <Button Grid.Row="0" 
+                    Content="+ New Thread" 
+                    Command="{Binding CreateNewThreadCommand}"
+                    Padding="10,8" 
+                    Margin="0,0,0,8"
+                    Background="#007ACC" 
+                    Foreground="White" 
+                    FontWeight="SemiBold"
+                    BorderThickness="0" 
+                    HorizontalAlignment="Stretch" 
+                    Cursor="Hand"/>
+
+                <!-- Search Chats Button -->
+                <Button Grid.Row="1" 
+                    Content="🔍 Search Chats" 
+                    Command="{Binding SearchChatsCommand}"
+                    Padding="10,8" 
+                    Margin="0,0,0,10"
+                    Background="#333337" 
+                    Foreground="#F1F1F1" 
+                    BorderThickness="0" 
+                    HorizontalAlignment="Stretch" 
+                    Cursor="Hand"/>
+
+                <!-- Divider -->
+                <Rectangle Grid.Row="2" Height="1" Fill="#3F3F46" Margin="0,0,0,10"/>
+
+                <!-- Existing Threads List -->
+                <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding State.Threads}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Command="{Binding DataContext.SwitchThreadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                    Margin="0,0,0,4"
+                                    Padding="10,8"
+                                    Background="#2D2D30"
+                                    Foreground="#F1F1F1"
+                                    HorizontalContentAlignment="Left"
+                                    BorderThickness="0"
+                                    Cursor="Hand">
+                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
         </Border>
 
-        <!-- Chat History Box -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,0,0,10"
+        <!-- 2. MAIN CONTENT LAYER (Column 1) -->
+        <Grid Grid.Column="1" Margin="15">
+            <Grid.RowDefinitions>
+                <!-- Header/Status Bar -->
+                <RowDefinition Height="Auto"/>
+                <!-- Chat Message List -->
+                <RowDefinition Height="*"/>
+                <!-- User Input Area -->
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Status Header Bar with Menu Toggle Button -->
+            <Border Grid.Row="0" 
+                    Background="#252526" 
+                    BorderBrush="#3F3F46" 
+                    BorderThickness="0,0,0,1" 
+                    Padding="10,8" 
+                    Margin="0,0,0,10" 
+                    CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Sidebar Toggle Button (☰) -->
+                    <Button Grid.Column="0" 
+                            Content="☰" 
+                            Command="{Binding ToggleSidebarCommand}"
+                            Width="32" Height="32"
+                            Margin="0,0,10,0"
+                            FontSize="15"
+                            Background="#2D2D30" 
+                            Foreground="#007ACC"
+                            BorderThickness="0" 
+                            Cursor="Hand">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="btnBorder" Background="{TemplateBinding Background}" CornerRadius="4">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="btnBorder" Property="Background" Value="#3E3E42"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <!-- Status Indicator -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Status: " FontWeight="Bold" Foreground="#888888"/>
+                        <TextBlock Text="{Binding State.StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Chat History Box -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,0,0,10"
                       localBehaviors:AutoScrollBehavior.AutoScroll="True">
-            <ItemsControl ItemsSource="{Binding State.Messages}"  Padding="0,0,12,0">
-                <ItemsControl.ItemContainerStyle>
-                    <Style TargetType="ContentPresenter">
-                        <Setter Property="HorizontalAlignment" Value="Stretch"/>
-                    </Style>
-                </ItemsControl.ItemContainerStyle>
-                
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <!-- Bubble Container with Dynamic Alignment & Styling -->
-                        <Border x:Name="BubbleBorder"
+                <ItemsControl ItemsSource="{Binding State.Messages}" Padding="0,0,12,0">
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- Bubble Container -->
+                            <Border x:Name="BubbleBorder"
                                 Margin="0,6" 
                                 Padding="12,10" 
                                 CornerRadius="8" 
@@ -55,78 +180,75 @@
                                 Background="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=Background}"
                                 BorderBrush="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=BorderBrush}"
                                 BorderThickness="1">
-                            <StackPanel>
-                                <!-- Role Header Label (YOU vs SCRIBBLEBOT) -->
-                                <TextBlock Text="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=RoleText}"
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=RoleText}"
                                            Foreground="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=RoleColor}"
                                            FontWeight="Bold" 
                                            FontSize="11"
                                            Margin="0,0,0,6"/>
 
-                                <!-- Message Text -->
-                                <TextBlock Text="{Binding Text}" 
+                                    <TextBlock Text="{Binding Text}" 
                                            TextWrapping="Wrap" 
                                            Foreground="#F1F1F1" 
                                            FontSize="13.5"
                                            LineHeight="20"/>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
 
-        <!-- Input Box and Send Button -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
+            <!-- Input Box and Send Button -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-            <TextBox Grid.Column="0" 
+                <TextBox Grid.Column="0" 
                      Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}" 
                      Padding="8" FontSize="14" Background="#252526" Foreground="#FFFFFF" 
                      BorderBrush="#3F3F46" VerticalContentAlignment="Center" Margin="0,0,10,0">
-                <TextBox.InputBindings>
-                    <KeyBinding Key="Enter" Command="{Binding SendMessageCommand}"/>
-                </TextBox.InputBindings>
-            </TextBox>
+                    <TextBox.InputBindings>
+                        <KeyBinding Key="Enter" Command="{Binding SendMessageCommand}"/>
+                    </TextBox.InputBindings>
+                </TextBox>
 
-            <Button Grid.Column="1" 
+                <Button Grid.Column="1" 
                     Content="Send" 
                     Command="{Binding SendMessageCommand}" 
                     Padding="20,8" Cursor="Hand">
-                <Button.Style>
-                    <Style TargetType="Button">
-                        <Setter Property="Background" Value="#007ACC"/>
-                        <Setter Property="Foreground" Value="White"/>
-                        <Setter Property="BorderThickness" Value="0"/>
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="Button">
-                                    <Border x:Name="border" 
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Background" Value="#007ACC"/>
+                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="border" 
                                             Background="{TemplateBinding Background}" 
                                             CornerRadius="4" 
                                             Padding="{TemplateBinding Padding}">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <!-- Hover State -->
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="border" Property="Background" Value="#1C97EA"/>
-                                        </Trigger>
-                                        <!-- Disabled State (While Agent is Thinking) -->
-                                        <Trigger Property="IsEnabled" Value="False">
-                                            <Setter TargetName="border" Property="Background" Value="#333337"/>
-                                            <Setter Property="Foreground" Value="#656565"/>
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </Button.Style>
-            </Button>
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="border" Property="Background" Value="#1C97EA"/>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter TargetName="border" Property="Background" Value="#333337"/>
+                                                <Setter Property="Foreground" Value="#656565"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </Grid>
         </Grid>
     </Grid>
 </Window>
