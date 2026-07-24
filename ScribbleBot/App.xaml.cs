@@ -57,10 +57,69 @@ public partial class App : Application
         // Launch Main Window
         var mainWindow = _host.Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
+
+        _ = WarmupModelAsync();
+    }
+
+    private async Task WarmupModelAsync()
+    {
+        var state = Services.GetRequiredService<AgentState>();
+        var chatClient = Services.GetRequiredService<IChatClient>();
+        var settings = Services.GetRequiredService<IOptions<OllamaSettings>>().Value;
+
+        try
+        {
+            state.IsWarmingUp = true;
+            state.StatusMessage = "Warming up model...";
+
+            // Send an empty prompt with keep_alive set to load the weights into VRAM
+            var options = new ChatOptions
+            {
+                AdditionalProperties = new()
+                {
+                    ["keep_alive"] = settings.KeepAlive ? "-1m" : "5m" // e.g.
+                }
+            };
+
+            await chatClient.GetResponseAsync([new ChatMessage(ChatRole.User, " ")], options);
+
+            state.StatusMessage = "Ready";
+        }
+        catch (Exception ex)
+        {
+            state.StatusMessage = $"Warmup failed: {ex.Message}";
+        }
+        finally
+        {
+            state.IsWarmingUp = false;
+        }
     }
 
     protected override async void OnExit(ExitEventArgs e)
     {
+        try
+        {
+            var chatClient = Services.GetService<IChatClient>();
+            var settings = Services.GetRequiredService<IOptions<OllamaSettings>>().Value;
+
+            if (chatClient != null && settings.UnloadOnExit)
+            {
+                // Passing keep_alive: "0s" instructs Ollama to immediately unload the model from VRAM                
+                var options = new ChatOptions
+                {
+                    AdditionalProperties = new()
+                    {
+                        ["keep_alive"] = "0s"
+                    }
+                };
+                // Block directly on the task so WPF waits for Ollama to process the unload before terminating
+                chatClient.GetResponseAsync([new ChatMessage(ChatRole.User, " ")], options).GetAwaiter().GetResult();
+            }
+        }
+        catch
+        {           
+        }
+
         if (_host is not null)
         {
             await _host.StopAsync();

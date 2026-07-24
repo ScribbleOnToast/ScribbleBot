@@ -9,6 +9,11 @@
         Title="ScribbleBot Studio" Height="650" Width="900"
         Background="#1E1E1E" Foreground="#F1F1F1">
 
+    <Window.Resources>
+        <!-- Register the "Bubble Stlye" converter -->
+        <localBehaviors:MessageStyleConverter x:Key="StyleConv"/>
+    </Window.Resources>
+    
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <!-- Header/Status Bar -->
@@ -30,13 +35,39 @@
         <!-- Chat History Box -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,0,0,10"
                       localBehaviors:AutoScrollBehavior.AutoScroll="True">
-            <ItemsControl ItemsSource="{Binding State.Messages}">
+            <ItemsControl ItemsSource="{Binding State.Messages}"  Padding="0,0,12,0">
+                <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                    </Style>
+                </ItemsControl.ItemContainerStyle>
+                
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border Margin="0,4" Padding="10" CornerRadius="6" Background="#252526">
+                        <!-- Bubble Container with Dynamic Alignment & Styling -->
+                        <Border x:Name="BubbleBorder"
+                                Margin="0,6" 
+                                Padding="12,10" 
+                                CornerRadius="8" 
+                                MaxWidth="650"
+                                HorizontalAlignment="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=Alignment}"
+                                Background="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=Background}"
+                                BorderBrush="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=BorderBrush}"
+                                BorderThickness="1">
                             <StackPanel>
-                                <TextBlock Text="{Binding Role}" FontWeight="Bold" Foreground="#569CD6" Margin="0,0,0,4"/>
-                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="#DCDCDC" FontSize="13"/>
+                                <!-- Role Header Label (YOU vs SCRIBBLEBOT) -->
+                                <TextBlock Text="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=RoleText}"
+                                           Foreground="{Binding Role, Converter={StaticResource StyleConv}, ConverterParameter=RoleColor}"
+                                           FontWeight="Bold" 
+                                           FontSize="11"
+                                           Margin="0,0,0,6"/>
+
+                                <!-- Message Text -->
+                                <TextBlock Text="{Binding Text}" 
+                                           TextWrapping="Wrap" 
+                                           Foreground="#F1F1F1" 
+                                           FontSize="13.5"
+                                           LineHeight="20"/>
                             </StackPanel>
                         </Border>
                     </DataTemplate>

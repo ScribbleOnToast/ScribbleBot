@@ -11,6 +11,12 @@ namespace ScribbleBot.Settings
         [Required]
         // The model ID to use with the Ollama API, e.g., "gemma-4"
         public required string ModelId { get; set; }
+
+        // Flag to indicate whether the model should be kept alive between calls
+        public bool KeepAlive { get; set; }
+
+        // Flag to indicate whether the model should be unloaded when the application exits
+        public bool UnloadOnExit { get; set; }
     }
 
     public class GoogleSearchSettings

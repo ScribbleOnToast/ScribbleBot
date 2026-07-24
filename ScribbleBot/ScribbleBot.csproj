@@ -26,4 +26,10 @@
     <PackageReference Include="OllamaSharp" Version="5.4.27" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Page Update="ThemeResources\DarkTheme\ChatScrollBar.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
 </Project>
