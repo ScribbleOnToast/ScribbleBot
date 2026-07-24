@@ -3,10 +3,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using OllamaSharp;
+using ScribbleBot.Agents;
+using ScribbleBot.Agents.Tools;
 using ScribbleBot.Services;
 using ScribbleBot.Settings;
 using ScribbleBot.ViewModels;
-using ScribbleBot.Worker_Agents;
 using System.Windows;
 
 
@@ -46,9 +47,11 @@ public partial class App : Application
         builder.Services.AddSingleton<ChatWorker>();
         builder.Services.AddSingleton<SupervisorAgent>();
         builder.Services.AddSingleton<DatabaseService>();
-
-
-        //Transiets
+        builder.Services.AddHttpClient<GoogleSearchService>();
+        builder.Services.AddSingleton<GoogleSearchService>();
+        builder.Services.AddSingleton<ToolDispatcher>();
+        builder.Services.AddSingleton<ToolDispatcher>();
+        builder.Services.AddTransient<ChatWorker>();
         builder.Services.AddTransient<ContextCompactor>();
         builder.Services.AddTransient<MainViewModel>();
 

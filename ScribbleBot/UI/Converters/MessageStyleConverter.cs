@@ -4,7 +4,7 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 
-namespace ScribbleBot.Converters
+namespace ScribbleBot.UI.Converters
 {
     public class MessageStyleConverter : IValueConverter
     {

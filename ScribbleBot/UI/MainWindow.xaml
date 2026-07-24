@@ -4,8 +4,9 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ScribbleBot"
-        xmlns:localConverters="clr-namespace:ScribbleBot.Converters"
-        xmlns:localBehaviors="clr-namespace:ScribbleBot.Behaviors"
+        xmlns:localConverters="clr-namespace:ScribbleBot.UI.Converters"
+        xmlns:localBehaviors="clr-namespace:ScribbleBot.UI.Behaviors"
+        xmlns:md="clr-namespace:Markdig.Wpf;assembly=Markdig.Wpf"
         mc:Ignorable="d"
         Title="ScribbleBot Studio" Height="650" Width="900"
         Background="#1E1E1E" Foreground="#F1F1F1">
@@ -38,6 +39,8 @@
                     <RowDefinition Height="Auto"/>
                     <!-- Search Chats Button -->
                     <RowDefinition Height="Auto"/>
+                    <!-- Settings Button -->
+                    <RowDefinition Height="Auto"/>
                     <!-- Separator -->
                     <RowDefinition Height="*"/>
                     <!-- Threads List -->
@@ -67,26 +70,100 @@
                     BorderThickness="0" 
                     HorizontalAlignment="Stretch" 
                     Cursor="Hand"/>
+                
+                <!-- Settings Button -->
+                <Button Grid.Row="2" 
+                    Command="{Binding SettingsCommand}"
+                    Padding="10,8" 
+                    Margin="0,0,0,10"
+                    Background="#333337" 
+                    Foreground="#F1F1F1" 
+                    BorderThickness="0" 
+                    HorizontalAlignment="Stretch" 
+                    Cursor="Hand">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Gear Icon -->
+                        <TextBlock Text="&#xE713;" 
+                                   FontFamily="Segoe MDL2 Assets" 
+                                   FontSize="14" 
+                                   VerticalAlignment="Center" 
+                                   Margin="0,0,8,0"/>
 
-                <!-- Divider -->
-                <Rectangle Grid.Row="2" Height="1" Fill="#3F3F46" Margin="0,0,0,10"/>
+                        <!-- Label -->
+                        <TextBlock Text="Settings" 
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>               
+
+                    <!-- Divider -->
+                <Rectangle Grid.Row="3" Height="1" Fill="#3F3F46" Margin="0,0,0,10"/>
 
                 <!-- Existing Threads List -->
-                <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding State.Threads}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button Command="{Binding DataContext.SwitchThreadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    CommandParameter="{Binding}"
-                                    Margin="0,0,0,4"
-                                    Padding="10,8"
-                                    Background="#2D2D30"
-                                    Foreground="#F1F1F1"
-                                    HorizontalContentAlignment="Left"
-                                    BorderThickness="0"
-                                    Cursor="Hand">
-                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                </Button>
+                                <!-- Container row that listens for the mouse hover -->
+                                <Grid x:Name="ThreadRow" Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button Grid.Column="0"
+                                            Command="{Binding DataContext.SwitchThreadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Padding="10,8"
+                                            Background="#2D2D30"
+                                            Foreground="#F1F1F1"
+                                            HorizontalContentAlignment="Left"
+                                            BorderThickness="0"
+                                            Cursor="Hand">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <!-- Strip default WPF hover states completely -->
+                                                <Border Background="{TemplateBinding Background}" 
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" 
+                                                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Button.Template>
+
+                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                    </Button>
+
+                                    <!-- Delete Button (Hidden by default, shown on hover) -->
+                                    <Button x:Name="DeleteButton"
+                                            Grid.Column="1"
+                                            Command="{Binding DataContext.DeleteThreadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Content="✕"
+                                            Foreground="#F44336"
+                                            Background="#2D2D30"
+                                            BorderThickness="0"
+                                            Padding="10,0"
+                                            FontWeight="Bold"
+                                            Cursor="Hand"
+                                            Visibility="Collapsed">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}" 
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="Center" 
+                                                        VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </Grid>
+
+                                <!-- Trigger: Shows Delete Button when hovering anywhere on ThreadRow -->
+                                <DataTemplate.Triggers>
+                                    <Trigger SourceName="ThreadRow" Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="DeleteButton" Property="Visibility" Value="Visible"/>
+                                    </Trigger>
+                                </DataTemplate.Triggers>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -187,11 +264,10 @@
                                            FontSize="11"
                                            Margin="0,0,0,6"/>
 
-                                    <TextBlock Text="{Binding Text}" 
-                                           TextWrapping="Wrap" 
+                                    <md:MarkdownViewer Markdown="{Binding Text}" 
                                            Foreground="#F1F1F1" 
                                            FontSize="13.5"
-                                           LineHeight="20"/>
+                                           localBehaviors:ScrollParentBehavior.FixScroll="True"/>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

@@ -1,8 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ScribbleBot.Agents;
 using ScribbleBot.Models;
-using ScribbleBot.Worker_Agents;
-using System.Threading.Tasks;
 
 namespace ScribbleBot.ViewModels
 {
@@ -55,6 +54,15 @@ namespace ScribbleBot.ViewModels
         private void ToggleSidebar()
         {
             State.IsSidebarOpen = !State.IsSidebarOpen;
+        }
+
+        [RelayCommand]
+        private async Task DeleteThread(ChatThreadModel? thread)
+        {
+            if (thread != null)
+            {
+                await _supervisorAgent.DeleteThreadAsync(thread);
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using ScribbleBot.Models;
 using System.Collections.ObjectModel;
 
+namespace ScribbleBot.Agents;
 public partial class AgentState : ObservableObject
 {
     [ObservableProperty]

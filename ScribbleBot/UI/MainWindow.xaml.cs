@@ -1,10 +1,10 @@
-﻿using ScribbleBot.ViewModels;
-using ScribbleBot.Behaviors;
+﻿using ScribbleBot.UI.Behaviors;
+using ScribbleBot.ViewModels;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Animation;
-
+using ScribbleBot.Agents;
 namespace ScribbleBot
 {
     /// <summary>

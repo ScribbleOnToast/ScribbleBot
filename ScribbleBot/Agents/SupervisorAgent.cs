@@ -1,12 +1,14 @@
 ﻿using Microsoft.Extensions.AI;
 using ScribbleBot.Models;
 using ScribbleBot.Services;
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 
-namespace ScribbleBot.Worker_Agents
+namespace ScribbleBot.Agents
 {
+    /// <summary>
+    /// Coordinates high-level chat workflow: loads threads, routes user messages
+    /// to the ChatWorker, updates persistent storage, and manages in-memory
+    /// conversation state and summaries.
+    /// </summary>
     public class SupervisorAgent
     {
         private readonly ChatWorker _chatWorker;
@@ -14,6 +16,13 @@ namespace ScribbleBot.Worker_Agents
         private readonly AgentState _state;
         private readonly ContextCompactor _compactor;
 
+        /// <summary>
+        /// Creates a new SupervisorAgent.
+        /// </summary>
+        /// <param name="chatWorker">Worker that handles interactions with the chatbot/LLM.</param>
+        /// <param name="dbService">Service for persisting and retrieving threads and messages.</param>
+        /// <param name="state">Shared application state for threads, messages and UI flags.</param>
+        /// <param name="compactor">Component responsible for segmenting and summarizing history.</param>
         public SupervisorAgent(ChatWorker chatWorker, DatabaseService dbService, AgentState state, ContextCompactor compactor)
         {
             _chatWorker = chatWorker;
@@ -22,6 +31,10 @@ namespace ScribbleBot.Worker_Agents
             _compactor = compactor;
         }
 
+        /// <summary>
+        /// Loads saved threads from the database into state and selects an initial
+        /// thread (either the first existing thread or a newly created one).
+        /// </summary>
         public async Task InitializeAsync()
         {
             var savedThreads = await _dbService.GetAllThreadsAsync();
@@ -42,6 +55,10 @@ namespace ScribbleBot.Worker_Agents
             }
         }
 
+        /// <summary>
+        /// Creates and persists a new chat thread, inserts it into the state list,
+        /// and switches the UI context to the new thread.
+        /// </summary>
         public async Task CreateNewThreadAsync()
         {
             var newThread = new ChatThreadModel
@@ -57,6 +74,12 @@ namespace ScribbleBot.Worker_Agents
             await SwitchThreadAsync(newThread);
         }
 
+        /// <summary>
+        /// Switches the active thread context to the provided thread. Clears
+        /// in-memory message lists and loads the full message history for UI
+        /// rendering. Also constructs the ChatMessage list used by the LLM.
+        /// </summary>
+        /// <param name="thread">Thread to switch to. If null, the call is ignored.</param>
         public async Task SwitchThreadAsync(ChatThreadModel? thread)
         {
             if (thread == null) return;
@@ -93,6 +116,12 @@ namespace ScribbleBot.Worker_Agents
             }
         }
 
+        /// <summary>
+        /// Handles a user-submitted message: updates UI state, persists the
+        /// message, sends the composed context to the ChatWorker, persists the
+        /// assistant response, and triggers background checkpointing.
+        /// </summary>
+        /// <param name="userMessage">Raw user message text to process.</param>
         public async Task HandleUserMessageAsync(string userMessage)
         {
             if (string.IsNullOrWhiteSpace(userMessage) || _state.CurrentThread == null) return;
@@ -147,6 +176,12 @@ namespace ScribbleBot.Worker_Agents
             }
         }
 
+        /// <summary>
+        /// Performs background checkpointing: if the conversation exceeds the
+        /// active window budget, compacts overflow into the thread's
+        /// SystemSummary, persists the summary, and trims the in-memory
+        /// Messages list to the active window.
+        /// </summary>
         private async Task CheckpointMemoryAsync()
         {
             if (_state.CurrentThread == null) return;
@@ -166,6 +201,37 @@ namespace ScribbleBot.Worker_Agents
                 foreach (var msg in activeWindow)
                 {
                     _state.Messages.Add(msg);
+                }
+            }
+        }
+
+        public async Task DeleteThreadAsync(ChatThreadModel threadToDelete)
+        {
+            if (threadToDelete == null) return;
+
+            int deletedIndex = _state.Threads.IndexOf(threadToDelete);
+            if (deletedIndex == -1) return;
+
+            bool isDeletingCurrent = _state.CurrentThread?.Id == threadToDelete.Id;
+
+            // 1. Remove from Database and ObservableCollection
+            await _dbService.DeleteThreadAsync(threadToDelete.Id);
+            _state.Threads.Remove(threadToDelete);
+
+            // 2. Handle thread selection logic
+            if (isDeletingCurrent)
+            {
+                if (_state.Threads.Count == 0)
+                {
+                    // List is completely empty, spin up a fresh one
+                    await CreateNewThreadAsync();
+                }
+                else
+                {
+                    // Select thread directly "above" it (index - 1). 
+                    // If the deleted item was at index 0, take the new index 0.
+                    int nextIndex = Math.Max(0, deletedIndex - 1);
+                    await SwitchThreadAsync(_state.Threads[nextIndex]);
                 }
             }
         }

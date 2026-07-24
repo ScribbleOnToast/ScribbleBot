@@ -2,7 +2,7 @@
 using System.Windows;
 using System.Windows.Controls;
 
-namespace ScribbleBot.Behaviors
+namespace ScribbleBot.UI.Behaviors
 {
     public static class AutoScrollBehavior
     {

@@ -2,7 +2,7 @@
 using System.Windows;
 using System.Windows.Media.Animation;
 
-namespace ScribbleBot.Behaviors;
+namespace ScribbleBot.UI.Behaviors;
 
 public class GridLengthAnimation : AnimationTimeline
 {

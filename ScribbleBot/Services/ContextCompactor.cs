@@ -1,10 +1,5 @@
 ﻿using Microsoft.Extensions.AI;
-using ScribbleBot.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-
+using ScribbleBot.Agents;
 namespace ScribbleBot.Services;
 
 public class ContextCompactor
@@ -88,40 +83,7 @@ public class ContextCompactor
 
         var overflowText = string.Join("\n", overflowMessages.Select(m => $"{m.Role.Value.ToUpper()}: {m.Text}"));
 
-        string prompt;
-        if (string.IsNullOrWhiteSpace(existingSummary))
-        {
-            prompt = $"""
-            Summarize the key facts, user preferences, main topics, and decisions from these conversation turns.
-
-            REQUIREMENTS:
-            - Output MUST be a concise summary of 5 to 8 bullet points maximum.
-            - Focus on core user goals, important context or constraints mentioned, and key outcomes.
-            - Omit conversational filler, casual banter, greetings, and brief status checks.
-
-            Conversation Turns:
-            {overflowText}
-            """;
-        }
-        else
-        {
-            prompt = $"""
-            Synthesize and update the existing conversation summary with the new conversation turns provided below.
-
-            REQUIREMENTS:
-            - Combine and condense the old summary and new turns into a SINGLE updated summary.
-            - Output MUST be kept to a strict maximum of 5 to 8 bullet points.
-            - Retain important long-term facts, preferences, and key decisions.
-            - Overwrite obsolete details or changing user preferences with the newest information.
-            - Do NOT simply append text; re-compress the combined context so it remains clean and concise.
-
-            Existing Summary:
-            {existingSummary}
-
-            New Conversation Turns:
-            {overflowText}
-            """;
-        }
+        string prompt = string.IsNullOrWhiteSpace(existingSummary) ? SystemPromptFactory.CreateChatSummaryPrompt(overflowText) : existingSummary;
 
         try
         {
