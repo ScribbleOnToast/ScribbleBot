@@ -12,12 +12,14 @@ namespace ScribbleBot.Worker_Agents
         private readonly ChatWorker _chatWorker;
         private readonly DatabaseService _dbService;
         private readonly AgentState _state;
+        private readonly ContextCompactor _compactor;
 
-        public SupervisorAgent(ChatWorker chatWorker, DatabaseService dbService, AgentState state)
+        public SupervisorAgent(ChatWorker chatWorker, DatabaseService dbService, AgentState state, ContextCompactor compactor)
         {
             _chatWorker = chatWorker;
             _dbService = dbService;
             _state = state;
+            _compactor = compactor;
         }
 
         public async Task InitializeAsync()
@@ -63,7 +65,10 @@ namespace ScribbleBot.Worker_Agents
             _state.Messages.Clear();
             _state.ActiveMessages.Clear();
 
+            // 1. Fetch full history from DB for UI rendering
             var messages = await _dbService.GetMessagesForThreadAsync(thread.Id);
+
+            var allAiMessages = new List<ChatMessage>();
 
             foreach (var msg in messages)
             {
@@ -76,7 +81,15 @@ namespace ScribbleBot.Worker_Agents
                     _ => ChatRole.User
                 };
 
-                _state.Messages.Add(new ChatMessage(role, msg.Content));
+                allAiMessages.Add(new ChatMessage(role, msg.Content));
+            }
+
+            // 2. Segment history: Only push token-budgeted active window to state
+            var (activeWindow, _) = _compactor.SegmentHistory(allAiMessages);
+
+            foreach (var activeMsg in activeWindow)
+            {
+                _state.Messages.Add(activeMsg);
             }
         }
 
@@ -89,15 +102,13 @@ namespace ScribbleBot.Worker_Agents
 
             var now = DateTime.Now;
 
-            // 1. Add to Microsoft.Extensions.AI collection
+            // 1. Add to active context & UI
             _state.Messages.Add(new ChatMessage(ChatRole.User, userMessage));
-
-            // 2. Add to UI Observable Collection & Persist
             var userMsgModel = new ChatMessageModel { Role = "user", Content = userMessage, Timestamp = now };
             _state.ActiveMessages.Add(userMsgModel);
             await _dbService.AddMessageAsync(_state.CurrentThread.Id, userMsgModel);
 
-            // Auto-title on first turn
+            // Auto-title thread on first message
             if (_state.ActiveMessages.Count == 1 && _state.CurrentThread.Title == "New Conversation")
             {
                 _state.CurrentThread.Title = userMessage.Length > 25 ? userMessage[..25] + "..." : userMessage;
@@ -106,22 +117,22 @@ namespace ScribbleBot.Worker_Agents
 
             try
             {
-                // 3. Delegate execution to ChatWorker
                 _state.StatusMessage = "Chatbot: Thinking...";
                 string summary = _state.CurrentThread.SystemSummary ?? string.Empty;
 
+                // 2. Process query with active window + summary checkpoint
                 string botResponse = await _chatWorker.ProcessAsync(_state.Messages, summary);
 
-                // 4. Update memory & UI models
+                // 3. Update memory & UI
                 _state.Messages.Add(new ChatMessage(ChatRole.Assistant, botResponse));
-
                 var botMsgModel = new ChatMessageModel { Role = "assistant", Content = botResponse, Timestamp = DateTime.Now };
                 _state.ActiveMessages.Add(botMsgModel);
-
-                // 5. Save assistant response to SQLite
                 await _dbService.AddMessageAsync(_state.CurrentThread.Id, botMsgModel);
 
                 _state.StatusMessage = "Ready";
+
+                // 4. Fire Checkpointing Evaluation (Background Task)
+                _ = CheckpointMemoryAsync();
             }
             catch (Exception ex)
             {
@@ -133,6 +144,29 @@ namespace ScribbleBot.Worker_Agents
             finally
             {
                 _state.IsBusy = false;
+            }
+        }
+
+        private async Task CheckpointMemoryAsync()
+        {
+            if (_state.CurrentThread == null) return;
+
+            var (activeWindow, overflow) = _compactor.SegmentHistory(_state.Messages);
+
+            // If history exceeds active window budget, roll overflow turns into SystemSummary
+            if (overflow.Any())
+            {
+                var updatedSummary = await _compactor.UpdateSummaryAsync(_state.CurrentThread.SystemSummary ?? string.Empty, overflow);
+
+                _state.CurrentThread.SystemSummary = updatedSummary;
+                await _dbService.UpdateThreadSummaryAsync(_state.CurrentThread.Id, updatedSummary);
+
+                // Trim in-memory Messages list down to active window only
+                _state.Messages.Clear();
+                foreach (var msg in activeWindow)
+                {
+                    _state.Messages.Add(msg);
+                }
             }
         }
     }

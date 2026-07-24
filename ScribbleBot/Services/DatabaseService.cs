@@ -171,4 +171,22 @@ public class DatabaseService
         command.Parameters.AddWithValue("$id", threadId);
         await command.ExecuteNonQueryAsync();
     }
+
+    public async Task UpdateThreadSummaryAsync(string threadId, string summary)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+        UPDATE threads 
+        SET system_summary = $summary, last_updated_at = $updatedAt 
+        WHERE id = $id;";
+
+        command.Parameters.AddWithValue("$summary", summary);
+        command.Parameters.AddWithValue("$updatedAt", DateTime.Now.ToString("o"));
+        command.Parameters.AddWithValue("$id", threadId);
+
+        await command.ExecuteNonQueryAsync();
+    }
 }
