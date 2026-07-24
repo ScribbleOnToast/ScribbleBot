@@ -1,5 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ScribbleBot.Models;
 using ScribbleBot.Worker_Agents;
 using System.Threading.Tasks;
 
@@ -9,7 +10,6 @@ namespace ScribbleBot.ViewModels
     {
         private readonly SupervisorAgent _supervisorAgent;
 
-        // Expose our central AgentState so XAML can bind directly to state properties
         public AgentState State { get; }
 
         [ObservableProperty]
@@ -20,9 +20,11 @@ namespace ScribbleBot.ViewModels
         {
             _supervisorAgent = supervisorAgent;
             State = state;
+
+            // Load saved threads from SQLite on startup
+            _ = _supervisorAgent.InitializeAsync();
         }
 
-        // Condition controlling whether the Send button is enabled
         private bool CanSendMessage()
         {
             return !string.IsNullOrWhiteSpace(UserInput) && !State.IsBusy;
@@ -32,10 +34,21 @@ namespace ScribbleBot.ViewModels
         private async Task SendMessageAsync()
         {
             string textToSend = UserInput.Trim();
-            UserInput = string.Empty; // Clear text box immediately
+            UserInput = string.Empty;
 
-            // Hand off user prompt to the Supervisor Agent orchestrator
             await _supervisorAgent.HandleUserMessageAsync(textToSend);
+        }
+
+        [RelayCommand]
+        private async Task CreateNewThreadAsync()
+        {
+            await _supervisorAgent.CreateNewThreadAsync();
+        }
+
+        [RelayCommand]
+        private async Task SwitchThreadAsync(ChatThreadModel? thread)
+        {
+            await _supervisorAgent.SwitchThreadAsync(thread);
         }
     }
 }

@@ -3,7 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using OllamaSharp;
+using ScribbleBot.Services;
 using ScribbleBot.Settings;
+using ScribbleBot.ViewModels;
 using ScribbleBot.Worker_Agents;
 using System.Windows;
 
@@ -43,6 +45,12 @@ public partial class App : Application
         builder.Services.AddSingleton<AgentState>();
         builder.Services.AddSingleton<ChatWorker>();
         builder.Services.AddSingleton<SupervisorAgent>();
+        builder.Services.AddSingleton<DatabaseService>();
+
+
+        //Transiets
+        builder.Services.AddTransient<ContextCompactor>();
+        builder.Services.AddTransient<MainViewModel>();
 
         // ViewModel & MainWindow
         builder.Services.AddSingleton<ViewModels.MainViewModel>();

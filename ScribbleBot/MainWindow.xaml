@@ -4,14 +4,15 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ScribbleBot"
-        xmlns:localBehaviors="clr-namespace:ScribbleBot.ViewModels"
+        xmlns:localConverters="clr-namespace:ScribbleBot.Converters"
+        xmlns:localBehaviors="clr-namespace:ScribbleBot.Behaviors"
         mc:Ignorable="d"
         Title="ScribbleBot Studio" Height="650" Width="900"
         Background="#1E1E1E" Foreground="#F1F1F1">
 
     <Window.Resources>
         <!-- Register the "Bubble Stlye" converter -->
-        <localBehaviors:MessageStyleConverter x:Key="StyleConv"/>
+        <localConverters:MessageStyleConverter  x:Key="StyleConv"/>
     </Window.Resources>
     
     <Grid Margin="15">
