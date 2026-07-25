@@ -1,19 +1,48 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+					xmlns:md="clr-namespace:Markdig.Wpf;assembly=Markdig.Wpf">
 
-    <!-- Backgrounds -->
+    <!-- Window & Panel Backgrounds -->
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F5F5F5"/>
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#EAEAEA"/>
     <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#E6E6E6"/>
-    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#D0D0D0"/>
+    <SolidColorBrush x:Key="TextBoxBackgroundBrush" Color="#FFFFFF"/>
 
-    <!-- Text & Borders -->
+    <!-- Control & Button Backgrounds -->
+    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#E1E1E1"/>
+    <SolidColorBrush x:Key="SecondaryControlBackgroundBrush" Color="#E5E5E5"/>
+    <SolidColorBrush x:Key="ControlHoverBackgroundBrush" Color="#D6D6D6"/>
+    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#007ACC"/>
+
+    <!-- Foreground / Text Colors -->
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="#1E1E1E"/>
     <SolidColorBrush x:Key="SecondaryTextBrush" Color="#666666"/>
-    <SolidColorBrush x:Key="BorderBrush" Color="#CCCCCC"/>
+    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#A0A0A0"/>
 
-    <!-- Accent -->
+    <!-- Borders & Dividers -->
+    <SolidColorBrush x:Key="SidebarBorderBrush" Color="#D0D0D0"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#E0E0E0"/>
+    <SolidColorBrush x:Key="TextBoxBorderBrush" Color="#CCCCCC"/>
+
+    <!-- Accents & Actions -->
     <SolidColorBrush x:Key="AccentBrush" Color="#007ACC"/>
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#1C97EA"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#D32F2F"/>
+
+	<!-- MarkdownViewer (for fixing annoying colors in code blocks -->
+	<Style TargetType="{x:Type Run}" x:Key="{x:Static md:Styles.CodeStyleKey}">
+		<Setter Property="Background" Value="#E1E1E1"/>
+		<Setter Property="Foreground" Value="#1E1E1E"/>
+		<Setter Property="FontFamily" Value="Consolas"/>
+	</Style>
+
+	<!-- Code Blocks (e.g. ```csharp ... ```) -->
+	<Style TargetType="{x:Type Paragraph}" x:Key="{x:Static md:Styles.CodeBlockStyleKey}">
+		<Setter Property="Background" Value="#F5F5F5"/>
+		<Setter Property="Foreground" Value="#1E1E1E"/>
+		<Setter Property="FontFamily" Value="Consolas"/>
+		<Setter Property="Padding" Value="8"/>
+	</Style>
 
 </ResourceDictionary>

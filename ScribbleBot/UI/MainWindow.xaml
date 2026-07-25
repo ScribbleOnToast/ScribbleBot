@@ -160,9 +160,9 @@
                                            Margin="0,0,0,6"/>
 
                                     <md:MarkdownViewer Markdown="{Binding Text}" 
-                                           Foreground="{DynamicResource PrimaryTextBrush}" 
-                                           FontSize="13.5"
-                                           localBehaviors:ScrollParentBehavior.FixScroll="True"/>
+                                                       Foreground="{DynamicResource PrimaryTextBrush}" 
+                                                       FontSize="13.5"
+                                                       localBehaviors:ScrollParentBehavior.FixScroll="True"/>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
