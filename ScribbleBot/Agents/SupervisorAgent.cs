@@ -11,10 +11,11 @@ namespace ScribbleBot.Agents
     /// </summary>
     public class SupervisorAgent
     {
-        private readonly ChatWorker _chatWorker;
+        private readonly Dictionary<string, IWorkerAgent> _agents;
         private readonly DatabaseService _dbService;
         private readonly AgentState _state;
         private readonly ContextCompactor _compactor;
+        private readonly IntentRouter _router;
 
         /// <summary>
         /// Creates a new SupervisorAgent.
@@ -23,12 +24,29 @@ namespace ScribbleBot.Agents
         /// <param name="dbService">Service for persisting and retrieving threads and messages.</param>
         /// <param name="state">Shared application state for threads, messages and UI flags.</param>
         /// <param name="compactor">Component responsible for segmenting and summarizing history.</param>
-        public SupervisorAgent(ChatWorker chatWorker, DatabaseService dbService, AgentState state, ContextCompactor compactor)
+        public SupervisorAgent(IEnumerable<IWorkerAgent> agents, DatabaseService dbService, AgentState state, ContextCompactor compactor, IntentRouter router)
         {
-            _chatWorker = chatWorker;
+            _agents = agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
             _dbService = dbService;
             _state = state;
             _compactor = compactor;
+            _router = router;
+        }
+
+        /// <summary>
+        /// Resolves the best worker agent for the given user request.
+        /// Defaults to "ChatWorker" if no specialized agent matches.
+        /// </summary>
+        private async Task<IWorkerAgent> PickAgentForMessageAsync(string userMessage)
+        {
+            string targetAgentName = await _router.DetermineBestAgentAsync(userMessage, _agents.Values);
+
+            if (_agents.TryGetValue(targetAgentName, out var agent))
+            {
+                return agent;
+            }
+
+            return _agents["ChatWorker"];
         }
 
         /// <summary>
@@ -88,7 +106,6 @@ namespace ScribbleBot.Agents
             _state.Messages.Clear();
             _state.ActiveMessages.Clear();
 
-            // 1. Fetch full history from DB for UI rendering
             var messages = await _dbService.GetMessagesForThreadAsync(thread.Id);
 
             var allAiMessages = new List<ChatMessage>();
@@ -107,7 +124,6 @@ namespace ScribbleBot.Agents
                 allAiMessages.Add(new ChatMessage(role, msg.Content));
             }
 
-            // 2. Segment history: Only push token-budgeted active window to state
             var (activeWindow, _) = _compactor.SegmentHistory(allAiMessages);
 
             foreach (var activeMsg in activeWindow)
@@ -124,14 +140,13 @@ namespace ScribbleBot.Agents
         /// <param name="userMessage">Raw user message text to process.</param>
         public async Task HandleUserMessageAsync(string userMessage)
         {
-            if (string.IsNullOrWhiteSpace(userMessage) || _state.CurrentThread == null) return;
+            if (string.IsNullOrWhiteSpace(userMessage) || _state.CurrentThread == null || _state.IsBusy) return;
 
             _state.IsBusy = true;
-            _state.StatusMessage = "Supervisor: Routing request to Chatbot...";
 
             var now = DateTime.Now;
 
-            // 1. Add to active context & UI
+            // Add user message to thread memory and persist to DB
             _state.Messages.Add(new ChatMessage(ChatRole.User, userMessage));
             var userMsgModel = new ChatMessageModel { Role = "user", Content = userMessage, Timestamp = now };
             _state.ActiveMessages.Add(userMsgModel);
@@ -146,11 +161,13 @@ namespace ScribbleBot.Agents
 
             try
             {
-                _state.StatusMessage = "Chatbot: Thinking...";
+                _state.StatusMessage = "Supervisor: Routing request...";
+                var worker = await PickAgentForMessageAsync(userMessage);
+                _state.StatusMessage = $"{worker.Name}: Processing..."; 
                 string summary = _state.CurrentThread.SystemSummary ?? string.Empty;
 
-                // 2. Process query with active window + summary checkpoint
-                string botResponse = await _chatWorker.ProcessAsync(_state.Messages, summary);
+                // Send message history and system summary to the worker for processing
+                string botResponse = await worker.ProcessAsync(_state.Messages, summary);
 
                 // 3. Update memory & UI
                 _state.Messages.Add(new ChatMessage(ChatRole.Assistant, botResponse));
@@ -158,10 +175,9 @@ namespace ScribbleBot.Agents
                 _state.ActiveMessages.Add(botMsgModel);
                 await _dbService.AddMessageAsync(_state.CurrentThread.Id, botMsgModel);
 
+                await CheckpointMemoryAsync();
                 _state.StatusMessage = "Ready";
 
-                // 4. Fire Checkpointing Evaluation (Background Task)
-                _ = CheckpointMemoryAsync();
             }
             catch (Exception ex)
             {
@@ -214,11 +230,9 @@ namespace ScribbleBot.Agents
 
             bool isDeletingCurrent = _state.CurrentThread?.Id == threadToDelete.Id;
 
-            // 1. Remove from Database and ObservableCollection
             await _dbService.DeleteThreadAsync(threadToDelete.Id);
             _state.Threads.Remove(threadToDelete);
 
-            // 2. Handle thread selection logic
             if (isDeletingCurrent)
             {
                 if (_state.Threads.Count == 0)

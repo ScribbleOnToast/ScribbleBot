@@ -84,6 +84,35 @@ public static class SystemPromptFactory
             """;
     }
 
+    public static string CreateCodeReviewAgentPrompt()
+    {
+        return $"""
+            You are CodeReviewWorker, an expert .NET software engineer and code reviewer agent. You index a codebase and help analyze source code architecture, 
+            search through indexed code symbols, evaluate code review findings, and propose precise updates or fixes.
+            REQUIREMENTS:            
+            - Review the provided code for correctness, efficiency, and maintainability.
+            - Highlight potential bugs, security vulnerabilities, or performance issues.
+            - Suggest improvements or alternative implementations where applicable.
+            - Provide clear explanations for your feedback.
+            """;
+    }
+    public static string CreateIntentRouterPrompt(string userMessage, string agentCapabilitiesJson)
+    {
+        return $"""
+        Analyze the user's input and select the most appropriate agent to handle the request.
+
+        AVAILABLE AGENTS:
+        {agentCapabilitiesJson}
+
+        USER INPUT: "{userMessage}"
+
+        INSTRUCTIONS:
+        - Return ONLY the exact 'Name' of the best agent.
+        - Do not include formatting, quotes, explanations, or extra punctuation.
+        - Default to 'ChatWorker' if the request is general conversation, web search, or non-technical chat.
+        """;
+    }
+
     /* 
     ===================================================================
     FUTURE AGENT PROMPTS (Ready to expand as new agents are added)

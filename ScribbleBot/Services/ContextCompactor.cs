@@ -83,7 +83,7 @@ public class ContextCompactor
 
         var overflowText = string.Join("\n", overflowMessages.Select(m => $"{m.Role.Value.ToUpper()}: {m.Text}"));
 
-        string prompt = string.IsNullOrWhiteSpace(existingSummary) ? SystemPromptFactory.CreateChatSummaryPrompt(overflowText) : existingSummary;
+        string prompt = string.IsNullOrWhiteSpace(existingSummary) ? SystemPromptFactory.CreateChatSummaryPrompt(overflowText) : SystemPromptFactory.UpdateChatSummaryPrompt(existingSummary, overflowText);
 
         try
         {

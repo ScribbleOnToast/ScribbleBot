@@ -42,24 +42,28 @@ public partial class App : Application
             var ollamaOpts = sp.GetRequiredService<IOptions<OllamaSettings>>().Value;
             return new OllamaApiClient(ollamaOpts.Endpoint, ollamaOpts.ModelId);
         });
-        // Singletons
+
+        // Application State & Infrastructure Services
         builder.Services.AddSingleton<AgentState>();
-        builder.Services.AddSingleton<ChatWorker>();
-        builder.Services.AddSingleton<SupervisorAgent>();
         builder.Services.AddSingleton<DatabaseService>();
         builder.Services.AddHttpClient<GoogleSearchService>();
         builder.Services.AddSingleton<GoogleSearchService>();
+        builder.Services.AddSingleton<CodeIndexerService>();
+        builder.Services.AddSingleton<SupervisorAgent>();
+        builder.Services.AddSingleton<IntentRouter>();
         builder.Services.AddSingleton<ToolDispatcher>();
-        builder.Services.AddSingleton<ToolDispatcher>();
-        builder.Services.AddTransient<ChatWorker>();
         builder.Services.AddTransient<ContextCompactor>();
-        builder.Services.AddTransient<MainViewModel>();
+
+        // Register Agents implementing IWorkerAgent
+
+        builder.Services.AddSingleton<IWorkerAgent, ChatWorker>();
+        builder.Services.AddSingleton<IWorkerAgent, CodeReviewWorker>();
 
         // ViewModel & MainWindow
-        builder.Services.AddSingleton<ViewModels.MainViewModel>();
+        builder.Services.AddTransient<MainViewModel>();
         builder.Services.AddSingleton<MainWindow>(sp => new MainWindow
         {
-            DataContext = sp.GetRequiredService<ViewModels.MainViewModel>()
+            DataContext = sp.GetRequiredService<MainViewModel>()
         });
 
         _host = builder.Build();
