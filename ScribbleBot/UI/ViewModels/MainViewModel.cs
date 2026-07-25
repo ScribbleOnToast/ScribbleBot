@@ -15,10 +15,27 @@ namespace ScribbleBot.ViewModels
         [NotifyCanExecuteChangedFor(nameof(SendMessageCommand))]
         private string _userInput = string.Empty;
 
+        // Current Sidebar View State
+        [ObservableProperty]
+        private SidebarViewType _currentSidebarView = SidebarViewType.Threads;
+
+        // Dark Mode Property (Triggers theme change when toggled)
+        [ObservableProperty]
+        private bool _isDarkMode = true;
+
         public MainViewModel(SupervisorAgent supervisorAgent, AgentState state)
         {
             _supervisorAgent = supervisorAgent;
             State = state;
+
+            // Re-evaluate SendMessageCommand when IsBusy changes
+            State.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(AgentState.IsBusy))
+                {
+                    SendMessageCommand.NotifyCanExecuteChanged();
+                }
+            };
 
             // Load saved threads from SQLite on startup
             _ = _supervisorAgent.InitializeAsync();
@@ -36,6 +53,19 @@ namespace ScribbleBot.ViewModels
             UserInput = string.Empty;
 
             await _supervisorAgent.HandleUserMessageAsync(textToSend);
+        }
+
+        // --- NAVIGATION COMMANDS ---
+        [RelayCommand]
+        private void Settings()
+        {
+            CurrentSidebarView = SidebarViewType.Settings;
+        }
+
+        [RelayCommand]
+        private void ShowThreads()
+        {
+            CurrentSidebarView = SidebarViewType.Threads;
         }
 
         [RelayCommand]
@@ -64,5 +94,14 @@ namespace ScribbleBot.ViewModels
                 await _supervisorAgent.DeleteThreadAsync(thread);
             }
         }
+        partial void OnIsDarkModeChanged(bool value)
+        {
+            ScribbleBot.Services.ThemeManager.ApplyTheme(value);
+        }
     }
+    public enum SidebarViewType
+    {
+        Threads,
+        Settings
+    }    
 }

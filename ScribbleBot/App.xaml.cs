@@ -55,8 +55,8 @@ public partial class App : Application
         builder.Services.AddTransient<ContextCompactor>();
 
         // Register Agents implementing IWorkerAgent
-
         builder.Services.AddSingleton<IWorkerAgent, ChatWorker>();
+        builder.Services.AddSingleton<IWorkerAgent, CodeAnalysisWorker>();
         builder.Services.AddSingleton<IWorkerAgent, CodeReviewWorker>();
 
         // ViewModel & MainWindow

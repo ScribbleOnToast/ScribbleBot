@@ -7,9 +7,11 @@
         xmlns:localConverters="clr-namespace:ScribbleBot.UI.Converters"
         xmlns:localBehaviors="clr-namespace:ScribbleBot.UI.Behaviors"
         xmlns:md="clr-namespace:Markdig.Wpf;assembly=Markdig.Wpf"
+        xmlns:views="clr-namespace:ScribbleBot.UI.Views"
         mc:Ignorable="d"
         Title="ScribbleBot Studio" Height="650" Width="900"
-        Background="#1E1E1E" Foreground="#F1F1F1">
+        Background="{DynamicResource WindowBackgroundBrush}" 
+        Foreground="{DynamicResource PrimaryTextBrush}">
 
     <Window.Resources>
         <localConverters:MessageStyleConverter x:Key="StyleConv"/>
@@ -25,149 +27,42 @@
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- 1. SIDEBAR PANEL (Column 0) -->
+        <!-- SIDEBAR PANEL (Column 0) -->
         <Border Grid.Column="0" 
-            Background="#252526" 
-            BorderBrush="#3F3F46" 
-            BorderThickness="0,0,1,0" 
-            Width="260"
-            Padding="12">
+                Background="{DynamicResource SidebarBackgroundBrush}" 
+                BorderBrush="{DynamicResource SidebarBorderBrush}" 
+                BorderThickness="0,0,1,0" 
+                Width="260"
+                Padding="12">
+
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <!-- New Thread Button -->
-                    <RowDefinition Height="Auto"/>
-                    <!-- Search Chats Button -->
-                    <RowDefinition Height="Auto"/>
-                    <!-- Settings Button -->
-                    <RowDefinition Height="Auto"/>
-                    <!-- Separator -->
-                    <RowDefinition Height="*"/>
-                    <!-- Threads List -->
-                </Grid.RowDefinitions>
+                <!-- Threads View (Shown when CurrentSidebarView == Threads) -->
+                <views:ThreadsSidebarView>
+                    <views:ThreadsSidebarView.Style>
+                        <Style TargetType="UserControl">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CurrentSidebarView}" Value="Threads">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </views:ThreadsSidebarView.Style>
+                </views:ThreadsSidebarView>
 
-                <!-- New Thread Button -->
-                <Button Grid.Row="0" 
-                    Content="+ New Thread" 
-                    Command="{Binding CreateNewThreadCommand}"
-                    Padding="10,8" 
-                    Margin="0,0,0,8"
-                    Background="#007ACC" 
-                    Foreground="White" 
-                    FontWeight="SemiBold"
-                    BorderThickness="0" 
-                    HorizontalAlignment="Stretch" 
-                    Cursor="Hand"/>
-
-                <!-- Search Chats Button -->
-                <Button Grid.Row="1" 
-                    Content="🔍 Search Chats" 
-                    Command="{Binding SearchChatsCommand}"
-                    Padding="10,8" 
-                    Margin="0,0,0,10"
-                    Background="#333337" 
-                    Foreground="#F1F1F1" 
-                    BorderThickness="0" 
-                    HorizontalAlignment="Stretch" 
-                    Cursor="Hand"/>
-                
-                <!-- Settings Button -->
-                <Button Grid.Row="2" 
-                    Command="{Binding SettingsCommand}"
-                    Padding="10,8" 
-                    Margin="0,0,0,10"
-                    Background="#333337" 
-                    Foreground="#F1F1F1" 
-                    BorderThickness="0" 
-                    HorizontalAlignment="Stretch" 
-                    Cursor="Hand">
-                    <StackPanel Orientation="Horizontal">
-                        <!-- Gear Icon -->
-                        <TextBlock Text="&#xE713;" 
-                                   FontFamily="Segoe MDL2 Assets" 
-                                   FontSize="14" 
-                                   VerticalAlignment="Center" 
-                                   Margin="0,0,8,0"/>
-
-                        <!-- Label -->
-                        <TextBlock Text="Settings" 
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>               
-
-                    <!-- Divider -->
-                <Rectangle Grid.Row="3" Height="1" Fill="#3F3F46" Margin="0,0,0,10"/>
-
-                <!-- Existing Threads List -->
-                <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding State.Threads}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <!-- Container row that listens for the mouse hover -->
-                                <Grid x:Name="ThreadRow" Margin="0,0,0,4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-
-                                    <Button Grid.Column="0"
-                                            Command="{Binding DataContext.SwitchThreadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            CommandParameter="{Binding}"
-                                            Padding="10,8"
-                                            Background="#2D2D30"
-                                            Foreground="#F1F1F1"
-                                            HorizontalContentAlignment="Left"
-                                            BorderThickness="0"
-                                            Cursor="Hand">
-                                        <Button.Template>
-                                            <ControlTemplate TargetType="Button">
-                                                <!-- Strip default WPF hover states completely -->
-                                                <Border Background="{TemplateBinding Background}" 
-                                                        Padding="{TemplateBinding Padding}">
-                                                    <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" 
-                                                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
-                                                </Border>
-                                            </ControlTemplate>
-                                        </Button.Template>
-
-                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                    </Button>
-
-                                    <!-- Delete Button (Hidden by default, shown on hover) -->
-                                    <Button x:Name="DeleteButton"
-                                            Grid.Column="1"
-                                            Command="{Binding DataContext.DeleteThreadCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            CommandParameter="{Binding}"
-                                            Content="✕"
-                                            Foreground="#F44336"
-                                            Background="#2D2D30"
-                                            BorderThickness="0"
-                                            Padding="10,0"
-                                            FontWeight="Bold"
-                                            Cursor="Hand"
-                                            Visibility="Collapsed">
-                                        <Button.Template>
-                                            <ControlTemplate TargetType="Button">
-                                                <Border Background="{TemplateBinding Background}" 
-                                                        Padding="{TemplateBinding Padding}">
-                                                    <ContentPresenter HorizontalAlignment="Center" 
-                                                        VerticalAlignment="Center"/>
-                                                </Border>
-                                            </ControlTemplate>
-                                        </Button.Template>
-                                    </Button>
-                                </Grid>
-
-                                <!-- Trigger: Shows Delete Button when hovering anywhere on ThreadRow -->
-                                <DataTemplate.Triggers>
-                                    <Trigger SourceName="ThreadRow" Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="DeleteButton" Property="Visibility" Value="Visible"/>
-                                    </Trigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
+                <!-- Settings View (Shown when CurrentSidebarView == Settings) -->
+                <views:SettingsSidebarView>
+                    <views:SettingsSidebarView.Style>
+                        <Style TargetType="UserControl">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CurrentSidebarView}" Value="Settings">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </views:SettingsSidebarView.Style>
+                </views:SettingsSidebarView>
             </Grid>
         </Border>
 
@@ -184,8 +79,8 @@
 
             <!-- Status Header Bar with Menu Toggle Button -->
             <Border Grid.Row="0" 
-                    Background="#252526" 
-                    BorderBrush="#3F3F46" 
+                    Background="{DynamicResource PanelBackgroundBrush}" 
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,0,1" 
                     Padding="10,8" 
                     Margin="0,0,0,10" 
@@ -203,8 +98,8 @@
                             Width="32" Height="32"
                             Margin="0,0,10,0"
                             FontSize="15"
-                            Background="#2D2D30" 
-                            Foreground="#007ACC"
+                            Background="{DynamicResource ButtonBackgroundBrush}" 
+                            Foreground="{DynamicResource ButtonForegroundBrush}"
                             BorderThickness="0" 
                             Cursor="Hand">
                         <Button.Style>
@@ -229,8 +124,8 @@
 
                     <!-- Status Indicator -->
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Status: " FontWeight="Bold" Foreground="#888888"/>
-                        <TextBlock Text="{Binding State.StatusMessage}" Foreground="#007ACC" FontWeight="SemiBold"/>
+                        <TextBlock Text="Status: " FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                        <TextBlock Text="{Binding State.StatusMessage}" Foreground="{DynamicResource PrimaryTextBrush}" FontWeight="SemiBold"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -265,7 +160,7 @@
                                            Margin="0,0,0,6"/>
 
                                     <md:MarkdownViewer Markdown="{Binding Text}" 
-                                           Foreground="#F1F1F1" 
+                                           Foreground="{DynamicResource PrimaryTextBrush}" 
                                            FontSize="13.5"
                                            localBehaviors:ScrollParentBehavior.FixScroll="True"/>
                                 </StackPanel>
@@ -284,8 +179,8 @@
 
                 <TextBox Grid.Column="0" 
                      Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}" 
-                     Padding="8" FontSize="14" Background="#252526" Foreground="#FFFFFF" 
-                     BorderBrush="#3F3F46" VerticalContentAlignment="Center" Margin="0,0,10,0">
+                     Padding="8" FontSize="14" Background="{DynamicResource TextBoxBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" 
+                     BorderBrush="{DynamicResource TextBoxBorderBrush}" VerticalContentAlignment="Center" Margin="0,0,10,0">
                     <TextBox.InputBindings>
                         <KeyBinding Key="Enter" Command="{Binding SendMessageCommand}"/>
                     </TextBox.InputBindings>
@@ -297,8 +192,8 @@
                     Padding="20,8" Cursor="Hand">
                     <Button.Style>
                         <Style TargetType="Button">
-                            <Setter Property="Background" Value="#007ACC"/>
-                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
                             <Setter Property="BorderThickness" Value="0"/>
                             <Setter Property="Template">
                                 <Setter.Value>
@@ -314,8 +209,8 @@
                                                 <Setter TargetName="border" Property="Background" Value="#1C97EA"/>
                                             </Trigger>
                                             <Trigger Property="IsEnabled" Value="False">
-                                                <Setter TargetName="border" Property="Background" Value="#333337"/>
-                                                <Setter Property="Foreground" Value="#656565"/>
+                                                <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>

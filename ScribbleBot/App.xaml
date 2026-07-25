@@ -5,7 +5,8 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="ThemeResources/DarkTheme/ChatScrollBar.xaml"/>
+                <ResourceDictionary Source="UI/Themes/ThemeResources/DarkTheme/ChatScrollBar.xaml"/>
+                <ResourceDictionary Source="UI/Themes/DarkTheme.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

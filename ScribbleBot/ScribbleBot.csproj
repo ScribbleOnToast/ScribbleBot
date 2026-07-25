@@ -33,7 +33,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Page Update="ThemeResources\DarkTheme\ChatScrollBar.xaml">
+    <Page Update="UI\Themes\ThemeResources\DarkTheme\ChatScrollBar.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>

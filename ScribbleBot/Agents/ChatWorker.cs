@@ -26,6 +26,7 @@ namespace ScribbleBot.Agents
         public async Task<string> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary)
         {
             string systemPrompt = SystemPromptFactory.CreateGeneralChatPrompt();
+            systemPrompt += SystemPromptFactory.UpdateWithDarkModeInstructions();
 
             //Make sure to compact the payload to fit within the model's context window
             var compactedPayload = await _compactor.PreparePayloadAsync(history, systemSummary, systemPrompt);
