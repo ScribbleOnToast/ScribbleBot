@@ -16,7 +16,7 @@ namespace ScribbleBot.Agents
         // Worker Model
         string Model { get; set; } 
 
-        Task<string> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary);
+        Task<ChatResponse?> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary);
 
     }
 }

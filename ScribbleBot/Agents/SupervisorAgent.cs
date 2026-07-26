@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using ScribbleBot.Models;
 using ScribbleBot.Services;
+using System.Windows.Interop;
 
 namespace ScribbleBot.Agents
 {
@@ -104,7 +105,7 @@ namespace ScribbleBot.Agents
         public async Task CreateNewThreadAsync()
         {
             _logger.LogInformation("Creating new chat thread");
-            var newThread = new ChatThreadModel
+            var newThread = new ChatThreadEntity
             {
                 Id = Guid.NewGuid().ToString(),
                 Title = "New Conversation",
@@ -123,7 +124,7 @@ namespace ScribbleBot.Agents
         /// rendering. Also constructs the ChatMessage list used by the LLM.
         /// </summary>
         /// <param name="thread">Thread to switch to. If null, the call is ignored.</param>
-        public async Task SwitchThreadAsync(ChatThreadModel? thread)
+        public async Task SwitchThreadAsync(ChatThreadEntity? thread)
         {
             _logger.LogInformation("Switching to thread: {ThreadTitle}", thread?.Title ?? "null");
             if (thread == null) return;
@@ -133,24 +134,23 @@ namespace ScribbleBot.Agents
             _state.ActiveMessages.Clear();
 
             var messages = await _dbService.GetMessagesForThreadAsync(thread.Id);
-
-            var allAiMessages = new List<ChatMessage>();
-
-            foreach (var msg in messages)
+            foreach (var message in messages)
             {
-                _state.ActiveMessages.Add(msg);
-
-                var role = msg.Role.ToLower() switch
+                _state.ActiveMessages.Add(new ChatMessage
                 {
-                    "assistant" => ChatRole.Assistant,
-                    "system" => ChatRole.System,
-                    _ => ChatRole.User
-                };
-
-                allAiMessages.Add(new ChatMessage(role, msg.Content));
+                    Role = message.Role.ToLower() switch 
+                    {
+                        "assistant" => ChatRole.Assistant,
+                        "system" => ChatRole.System,
+                        _ => ChatRole.User,
+                    },
+                    CreatedAt = message.Timestamp,
+                    Contents = ChatMessageSerializer.DeserializeContents(message.RichContentJson)
+                });
             }
-            _logger.LogInformation("Loaded {MessageCount} messages for thread.", allAiMessages.Count);
-            var (activeWindow, _) = _compactor.SegmentHistory(allAiMessages);
+
+            _logger.LogInformation("Loaded {MessageCount} messages for thread.", messages.Count);
+            var (activeWindow, _) = _compactor.SegmentHistory(_state.ActiveMessages);
 
             _logger.LogInformation("Hydrating thread with {ActiveCount} active messages.", activeWindow.Count);
             foreach (var activeMsg in activeWindow)
@@ -165,43 +165,54 @@ namespace ScribbleBot.Agents
         /// assistant response, and triggers background checkpointing.
         /// </summary>
         /// <param name="userMessage">Raw user message text to process.</param>
-        public async Task HandleUserMessageAsync(string userMessage)
+        public async Task HandleUserRichMessageAsync(ChatMessage userMessage)
         {
-            if (string.IsNullOrWhiteSpace(userMessage) || _state.CurrentThread == null || _state.IsBusy) return;
-
+            if (!userMessage.Contents.Any() || _state.CurrentThread == null || _state.IsBusy) return;
             _state.IsBusy = true;
 
             var now = DateTime.Now;
 
-            _state.Messages.Add(new ChatMessage(ChatRole.User, userMessage));
-            var userMsgModel = new ChatMessageModel { Role = "user", Content = userMessage, Timestamp = now };
-            _state.ActiveMessages.Add(userMsgModel);
-            await _dbService.AddMessageAsync(_state.CurrentThread.Id, userMsgModel);
+            _state.Messages.Add(userMessage);
+            _state.ActiveMessages.Add(userMessage);
+            await _dbService.AddMessageAsync(_state.CurrentThread.Id,
+                new ChatMessageEntity
+                {
+                    ThreadId = _state.CurrentThread.Id,
+                    Role = "user",
+                    Timestamp = DateTime.Now,
+                    RichContentJson = ChatMessageSerializer.SerializeContents(userMessage.Contents)
+                });
 
             if (_state.ActiveMessages.Count == 1 && _state.CurrentThread.Title == "New Conversation")
             {
-                _state.CurrentThread.Title = userMessage.Length > 25 ? userMessage[..25] + "..." : userMessage;
+                _state.CurrentThread.Title = userMessage.Text.Length > 25 ? userMessage.Text[..25] + "..." : userMessage.Text;
+                _state.CurrentThread.LastUpdatedAt = DateTime.Now;
                 await _dbService.SaveThreadAsync(_state.CurrentThread);
             }
 
             try
             {
                 _state.StatusMessage = "Supervisor: Routing request...";
-                var worker = await PickAgentForMessageAsync(userMessage);
+                var worker = await PickAgentForMessageAsync(userMessage.Text);
                 _state.StatusMessage = $"{worker.Name}: Processing..."; 
                 string summary = _state.CurrentThread.SystemSummary ?? string.Empty;
 
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                string botResponse = await worker.ProcessAsync(_state.Messages, summary);
+                var botResponse = await worker.ProcessAsync(_state.Messages, summary);
                 stopwatch.Stop();
                 _logger.LogInformation("Worker {WorkerName} completed request in {ElapsedMs}ms", worker.Name, stopwatch.ElapsedMilliseconds);
+                _state.Messages.Add(botResponse.Messages.Last());
+                _state.ActiveMessages.Add(botResponse.Messages.Last());
+                await _dbService.AddMessageAsync(_state.CurrentThread.Id,
+                    new ChatMessageEntity
+                    {
+                        ThreadId = _state.CurrentThread.Id,
+                        Role = "asssitant",
+                        Timestamp = DateTime.Now,
+                        RichContentJson = ChatMessageSerializer.SerializeContents(botResponse.Messages.Last().Contents)
+                    });
 
-                _state.Messages.Add(new ChatMessage(ChatRole.Assistant, botResponse));
-                var botMsgModel = new ChatMessageModel { Role = "assistant", Content = botResponse, Timestamp = DateTime.Now };
-                _state.ActiveMessages.Add(botMsgModel);
-                await _dbService.AddMessageAsync(_state.CurrentThread.Id, botMsgModel);
-
-                await CheckpointMemoryAsync();
+                //await CheckpointMemoryAsync(); - Need to rework this because we're not using the model anymore, we're using actual SDK classes
                 _state.StatusMessage = "Ready";
 
             }
@@ -209,8 +220,8 @@ namespace ScribbleBot.Agents
             {
                 _logger.LogError(ex, "Error occurred while handling user message in thread {ThreadId}", _state.CurrentThread.Id);
                 var errorMsg = $"[Error]: {ex.Message}";
-                _state.Messages.Add(new ChatMessage(ChatRole.Assistant, errorMsg));
-                _state.ActiveMessages.Add(new ChatMessageModel { Role = "assistant", Content = errorMsg, Timestamp = DateTime.Now });
+                //_state.Messages.Add(new ChatMessage(ChatRole.Assistant, errorMsg));
+                //_state.ActiveMessages.Add(new ChatMessageModel { Role = "assistant", Content = errorMsg, Timestamp = DateTime.Now });
                 _state.StatusMessage = "Error occurred";
             }
             finally
@@ -247,7 +258,7 @@ namespace ScribbleBot.Agents
             }
         }
 
-        public async Task DeleteThreadAsync(ChatThreadModel threadToDelete)
+        public async Task DeleteThreadAsync(ChatThreadEntity threadToDelete)
         {
             _logger.LogInformation("Deleting thread: {ThreadTitle}", threadToDelete?.Title ?? "null");
             if (threadToDelete == null) return;

@@ -22,7 +22,7 @@ namespace ScribbleBot.Agents
             _toolDispatcher = toolDispatcher;
         }
 
-        public async Task<string> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary)
+        public async Task<ChatResponse?> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary)
         {
             string systemPrompt = SystemPromptFactory.CreateCodeReviewAgentPrompt();
             systemPrompt += SystemPromptFactory.UpdateWithDarkModeInstructions();
@@ -64,10 +64,10 @@ namespace ScribbleBot.Agents
                     continue;
                 }
 
-                return response.Text ?? "No code review response generated.";
+                return response;
             }
 
-            return "Maximum tool execution iterations reached without a final response.";
+            return null;
         }
     }
 }

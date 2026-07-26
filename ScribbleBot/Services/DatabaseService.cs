@@ -2,6 +2,7 @@
 using ScribbleBot.Models;
 using System.IO;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.AI;
 
 namespace ScribbleBot.Services;
 
@@ -54,10 +55,10 @@ public class DatabaseService
     }
     
     #region Thread & Message Operations
-    public async Task<List<ChatThreadModel>> GetAllThreadsAsync()
+    public async Task<List<ChatThreadEntity>> GetAllThreadsAsync()
     {
         _logger.LogInformation("Fetching all chat threads from the database.");
-        var threads = new List<ChatThreadModel>();
+        var threads = new List<ChatThreadEntity>();
         try
         {
             using var connection = new SqliteConnection(_connectionString);
@@ -69,7 +70,7 @@ public class DatabaseService
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                threads.Add(new ChatThreadModel
+                threads.Add(new ChatThreadEntity
                 {
                     Id = reader.GetString(0),
                     Title = reader.GetString(1),
@@ -86,7 +87,7 @@ public class DatabaseService
         return threads;
     }
 
-    public async Task SaveThreadAsync(ChatThreadModel thread)
+    public async Task SaveThreadAsync(ChatThreadEntity thread)
     {
         try
         {
@@ -116,7 +117,7 @@ public class DatabaseService
         }
     }
 
-    public async Task AddMessageAsync(string threadId, ChatMessageModel message)
+    public async Task AddMessageAsync(string threadId, ChatMessageEntity message)
     {
         try
         {
@@ -128,14 +129,14 @@ public class DatabaseService
             var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"
-            INSERT INTO messages (thread_id, role, content, timestamp)
-            VALUES ($threadId, $role, $content, $timestamp);
+            INSERT INTO messages (thread_id, role, timestamp, content)
+            VALUES ($threadId, $role, $timestamp, $content);
 
             UPDATE threads SET last_updated_at = $timestamp WHERE id = $threadId;
             ";
-            command.Parameters.AddWithValue("$threadId", threadId);
+            command.Parameters.AddWithValue("$threadId", message.ThreadId);
             command.Parameters.AddWithValue("$role", message.Role);
-            command.Parameters.AddWithValue("$content", message.Content);
+            command.Parameters.AddWithValue("$content", message.RichContentJson);
             command.Parameters.AddWithValue("$timestamp", message.Timestamp.ToString("o"));
 
             await command.ExecuteNonQueryAsync();
@@ -147,10 +148,10 @@ public class DatabaseService
         }
     }
 
-    public async Task<List<ChatMessageModel>> GetMessagesForThreadAsync(string threadId)
+    public async Task<List<ChatMessageEntity>> GetMessagesForThreadAsync(string threadId)
     {
 
-        var messages = new List<ChatMessageModel>();
+        var messages = new List<ChatMessageEntity>();
         try
         {
             using var connection = new SqliteConnection(_connectionString);
@@ -163,10 +164,10 @@ public class DatabaseService
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                messages.Add(new ChatMessageModel
+                messages.Add(new ChatMessageEntity
                 {
                     Role = reader.GetString(0),
-                    Content = reader.GetString(1),
+                    RichContentJson = reader.GetString(1),
                     Timestamp = DateTime.Parse(reader.GetString(2))
                 });
             }
@@ -449,8 +450,8 @@ public class DatabaseService
             PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS threads (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
+                id text PRIMARY KEY,
+                title text NOT NULL,
                 created_at TEXT NOT NULL,
                 last_updated_at TEXT NOT NULL,
                 system_summary TEXT
@@ -458,10 +459,10 @@ public class DatabaseService
 
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                thread_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
+                thread_id text NOT NULL,
+                role TEXT NOT NULL,                
                 timestamp TEXT NOT NULL,
+                content TEXT NOT NULL,
                 FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
             );
 

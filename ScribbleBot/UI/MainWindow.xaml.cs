@@ -6,13 +6,14 @@ using System.Windows.Controls;
 using System.Windows.Media.Animation;
 using ScribbleBot.Agents;
 using System.IO;
+using ScribbleBot.Services;
 namespace ScribbleBot
 {
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
     public partial class MainWindow : Window
-    {
+    {        
         public MainWindow()
         {
             InitializeComponent();
@@ -55,7 +56,6 @@ namespace ScribbleBot
 
         private void OnPreviewDragOver(object sender, DragEventArgs e)
         {
-            // Only allow files/folders to be dropped
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 e.Effects = DragDropEffects.Copy;
@@ -63,35 +63,19 @@ namespace ScribbleBot
             }
         }
 
-        private void OnTextBoxDrop(object sender, DragEventArgs e)
+        private async void OnTextBoxDrop(object sender, DragEventArgs e)
         {
             if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
 
             string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-            if (files == null || files.Length == 0) return;
-
             var vm = DataContext as MainViewModel;
-            if (vm == null) return;
+            if (vm == null || files == null) return;
 
-            foreach (var filePath in files)
+            foreach (var path in files)
             {
-                // Read text files and append formatted block to UserInput
-                if (File.Exists(filePath))
-                {
-                    try
-                    {
-                        string extension = Path.GetExtension(filePath).TrimStart('.');
-                        string content = File.ReadAllText(filePath);
-
-                        string snippet = $"\n\n``` {extension} [{Path.GetFileName(filePath)}]\n{content}\n```\n";
-
-                        vm.UserInput += snippet;
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Could not read file: {ex.Message}", "File Read Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    }
-                }
+                // Offload parsing to ingestion service
+                var attachment = await vm._fileIngestionService.ProcessFileAsync(path);
+                vm.AttachedFiles.Add(attachment);
             }
 
             e.Handled = true;

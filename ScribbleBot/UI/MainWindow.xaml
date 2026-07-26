@@ -170,14 +170,46 @@
                 </ItemsControl>
             </ScrollViewer>
 
-            <!-- Input Box and Send Button -->
-            <Grid Grid.Row="2">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+			<!-- Input Area Container (Row 2) -->
+			<Grid Grid.Row="2">
+				<Grid.RowDefinitions>
+					<!-- Row 0: Attachment Chips Container -->
+					<RowDefinition Height="Auto"/>
+					<!-- Row 1: Input Box and Send Button -->
+					<RowDefinition Height="Auto"/>
+				</Grid.RowDefinitions>
 
-				<TextBox Grid.Column="0"
+				<!-- Attachment Chips Row -->
+				<ItemsControl Grid.Row="0" ItemsSource="{Binding AttachedFiles}" Margin="0,0,0,8">
+					<ItemsControl.ItemsPanel>
+						<ItemsPanelTemplate>
+							<WrapPanel Orientation="Horizontal"/>
+						</ItemsPanelTemplate>
+					</ItemsControl.ItemsPanel>
+						<ItemsControl.ItemTemplate>
+							<DataTemplate>
+								<Border Background="#333" CornerRadius="12" Padding="8,4" Margin="0,0,6,6">
+									<StackPanel Orientation="Horizontal">
+										<TextBlock Text="📎 " FontSize="11" Foreground="#AAA"/>
+										<TextBlock Text="{Binding FileName}" Foreground="White" FontSize="12" Margin="0,0,6,0"/>
+										<Button Content="✕"
+												Command="{Binding DataContext.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+												CommandParameter="{Binding}"
+												Background="Transparent" Foreground="#888" BorderThickness="0" Cursor="Hand"/>
+									</StackPanel>
+								</Border>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+
+				<!-- Text Input Row -->
+				<Grid Grid.Row="1">
+					<Grid.ColumnDefinitions>
+						<ColumnDefinition Width="*"/>
+						<ColumnDefinition Width="Auto"/>
+					</Grid.ColumnDefinitions>
+
+					<TextBox Grid.Column="0"
 							 Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
 							 Padding="8,6"
 							 FontSize="14"
@@ -190,47 +222,52 @@
 							 VerticalContentAlignment="Top"
 							 MinHeight="38"
 							 MaxHeight="120"
-							 VerticalScrollBarVisibility="Auto">
-					<TextBox.InputBindings>
-						<KeyBinding Key="Return" Command="{Binding SendMessageCommand}"/>
-						<KeyBinding Key="Return" Modifiers="Shift" Command="{x:Null}"/>
-					</TextBox.InputBindings>
-                </TextBox>
+							 VerticalScrollBarVisibility="Auto"
+							 AllowDrop="True"
+							 PreviewDragOver="OnPreviewDragOver"
+							 Drop="OnTextBoxDrop">
+						<TextBox.InputBindings>
+							<KeyBinding Key="Return" Command="{Binding SendMessageCommand}"/>
+							<KeyBinding Key="Return" Modifiers="Shift" Command="{x:Null}"/>
+						</TextBox.InputBindings>
+					</TextBox>
 
-                <Button Grid.Column="1" 
-                    Content="Send" 
-                    Command="{Binding SendMessageCommand}" 
-                    Padding="20,8" Cursor="Hand">
-                    <Button.Style>
-                        <Style TargetType="Button">
-                            <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
-                            <Setter Property="BorderThickness" Value="0"/>
-                            <Setter Property="Template">
-                                <Setter.Value>
-                                    <ControlTemplate TargetType="Button">
-                                        <Border x:Name="border" 
-                                            Background="{TemplateBinding Background}" 
-                                            CornerRadius="4" 
-                                            Padding="{TemplateBinding Padding}">
-                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                        </Border>
-                                        <ControlTemplate.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="border" Property="Background" Value="#1C97EA"/>
-                                            </Trigger>
-                                            <Trigger Property="IsEnabled" Value="False">
-                                                <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
-                                                <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
-                                            </Trigger>
-                                        </ControlTemplate.Triggers>
-                                    </ControlTemplate>
-                                </Setter.Value>
-                            </Setter>
-                        </Style>
-                    </Button.Style>
-                </Button>
-            </Grid>
+					<Button Grid.Column="1"
+							Content="Send"
+							Command="{Binding SendMessageCommand}"
+							Padding="20,8" Cursor="Hand"
+							VerticalAlignment="Bottom" Height="38">
+						<Button.Style>
+							<Style TargetType="Button">
+								<Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
+								<Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
+								<Setter Property="BorderThickness" Value="0"/>
+								<Setter Property="Template">
+									<Setter.Value>
+										<ControlTemplate TargetType="Button">
+											<Border x:Name="border"
+													Background="{TemplateBinding Background}"
+													CornerRadius="4"
+													Padding="{TemplateBinding Padding}">
+												<ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+											</Border>
+											<ControlTemplate.Triggers>
+												<Trigger Property="IsMouseOver" Value="True">
+													<Setter TargetName="border" Property="Background" Value="#1C97EA"/>
+												</Trigger>
+												<Trigger Property="IsEnabled" Value="False">
+													<Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
+													<Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
+												</Trigger>
+											</ControlTemplate.Triggers>
+										</ControlTemplate>
+									</Setter.Value>
+								</Setter>
+							</Style>
+						</Button.Style>
+					</Button>
+				</Grid>
+			</Grid>
         </Grid>
     </Grid>
 </Window>

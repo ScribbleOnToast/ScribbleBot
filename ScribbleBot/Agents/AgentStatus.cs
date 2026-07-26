@@ -19,13 +19,13 @@ public partial class AgentState : ObservableObject
     private bool _isWarmingUp;
 
     [ObservableProperty]
-    private ObservableCollection<ChatThreadModel> _threads = [];
+    private ObservableCollection<ChatThreadEntity> _threads = [];
 
     [ObservableProperty]
-    private ChatThreadModel? _currentThread;
+    private ChatThreadEntity? _currentThread;
 
     [ObservableProperty]
-    private ObservableCollection<ChatMessageModel> _activeMessages = [];
+    private ObservableCollection<ChatMessage> _activeMessages = [];
 
     [ObservableProperty]
     private bool _isSidebarOpen;

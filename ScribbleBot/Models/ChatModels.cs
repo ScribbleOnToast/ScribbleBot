@@ -3,14 +3,23 @@ using Microsoft.Extensions.AI;
 
 namespace ScribbleBot.Models
 {
-    public class ChatMessageModel
+    /// <summary>
+    /// DTO for storing messages which are in a thread
+    /// </summary>
+    public class ChatMessageEntity
     {
-        public string Role { get; set; } = "user"; // "user", "assistant", "system"
-        public string Content { get; set; } = string.Empty;
-        public DateTime Timestamp { get; set; } = DateTime.Now;
+        public int Id { get; set; }
+        public string? ThreadId { get; set; }
+        public string Role { get; set; } = "user"; // user, assistant, system
+        public DateTime Timestamp { get; set; }
+        public string RichContentJson { get; set; } = "[]";
 
     }
-public class ChatThreadModel
+
+    /// <summary>
+    /// DTO for storing threads
+    /// </summary>
+    public class ChatThreadEntity
     {
         public string Id { get; set; } = Guid.NewGuid().ToString();
 
@@ -20,6 +29,6 @@ public class ChatThreadModel
         public DateTime LastUpdatedAt { get; set; } = DateTime.Now;
         public string SystemSummary { get; set; } = string.Empty;
 
-        public List<ChatMessageModel> Messages { get; set; } = [];
+        public List<ChatMessageEntity> Messages { get; set; } = [];
     }
 }

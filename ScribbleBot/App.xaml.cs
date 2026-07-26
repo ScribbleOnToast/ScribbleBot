@@ -78,6 +78,7 @@ public partial class App : Application
         builder.Services.AddSingleton<IIntentRouter, IntentRouter>();
         builder.Services.AddSingleton<ToolDispatcher>();
         builder.Services.AddTransient<ContextCompactor>();
+        builder.Services.AddSingleton<FileIngestionService>();
 
         // Register Agents implementing IWorkerAgent
         builder.Services.AddSingleton<IWorkerAgent, ChatWorker>();

@@ -23,7 +23,7 @@ namespace ScribbleBot.Agents
             _toolDispatcher = toolDispatcher;
         }
 
-        public async Task<string> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary)
+        public async Task<ChatResponse?> ProcessAsync(IEnumerable<ChatMessage> history, string systemSummary)
         {
             string systemPrompt = SystemPromptFactory.CreateGeneralChatPrompt();
             systemPrompt += SystemPromptFactory.UpdateWithDarkModeInstructions();
@@ -68,10 +68,9 @@ namespace ScribbleBot.Agents
                     continue; // Re-run the model with results from tool call
                 }
 
-                return response.Text ?? "No response generated.";
+                return response;
             }
-
-            return "Maximum tool execution iterations reached without a final response.";
+            return null;
         }
     }
 }
