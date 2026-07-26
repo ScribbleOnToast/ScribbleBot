@@ -177,13 +177,24 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBox Grid.Column="0" 
-                     Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}" 
-                     Padding="8" FontSize="14" Background="{DynamicResource TextBoxBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" 
-                     BorderBrush="{DynamicResource TextBoxBorderBrush}" VerticalContentAlignment="Center" Margin="0,0,10,0">
-                    <TextBox.InputBindings>
-                        <KeyBinding Key="Enter" Command="{Binding SendMessageCommand}"/>
-                    </TextBox.InputBindings>
+				<TextBox Grid.Column="0"
+							 Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
+							 Padding="8,6"
+							 FontSize="14"
+							 Background="{DynamicResource TextBoxBackgroundBrush}"
+							 Foreground="{DynamicResource PrimaryTextBrush}"
+							 BorderBrush="{DynamicResource TextBoxBorderBrush}"
+							 Margin="0,0,10,0"
+							 AcceptsReturn="True"
+							 TextWrapping="Wrap"
+							 VerticalContentAlignment="Top"
+							 MinHeight="38"
+							 MaxHeight="120"
+							 VerticalScrollBarVisibility="Auto">
+					<TextBox.InputBindings>
+						<KeyBinding Key="Return" Command="{Binding SendMessageCommand}"/>
+						<KeyBinding Key="Return" Modifiers="Shift" Command="{x:Null}"/>
+					</TextBox.InputBindings>
                 </TextBox>
 
                 <Button Grid.Column="1" 

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Animation;
 using ScribbleBot.Agents;
+using System.IO;
 namespace ScribbleBot
 {
     /// <summary>
@@ -50,6 +51,50 @@ namespace ScribbleBot
             };
 
             SidebarColumn.BeginAnimation(ColumnDefinition.WidthProperty, animation);
+        }
+
+        private void OnPreviewDragOver(object sender, DragEventArgs e)
+        {
+            // Only allow files/folders to be dropped
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+                e.Handled = true;
+            }
+        }
+
+        private void OnTextBoxDrop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+
+            string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
+            if (files == null || files.Length == 0) return;
+
+            var vm = DataContext as MainViewModel;
+            if (vm == null) return;
+
+            foreach (var filePath in files)
+            {
+                // Read text files and append formatted block to UserInput
+                if (File.Exists(filePath))
+                {
+                    try
+                    {
+                        string extension = Path.GetExtension(filePath).TrimStart('.');
+                        string content = File.ReadAllText(filePath);
+
+                        string snippet = $"\n\n``` {extension} [{Path.GetFileName(filePath)}]\n{content}\n```\n";
+
+                        vm.UserInput += snippet;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Could not read file: {ex.Message}", "File Read Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }
+            }
+
+            e.Handled = true;
         }
     }
 }

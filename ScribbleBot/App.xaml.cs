@@ -9,9 +9,10 @@ using ScribbleBot.Agents.Tools;
 using ScribbleBot.Services;
 using ScribbleBot.Settings;
 using ScribbleBot.ViewModels;
+using Serilog;
+using System.IO;
 using System.Net.Http;
 using System.Windows;
-
 
 namespace ScribbleBot;
 
@@ -25,15 +26,31 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        string logFolder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ScribbleBot",
+        "logs");
+
+        string logFilePath = Path.Combine(logFolder, "scribblebot-.log");
+
+        // Configure Serilog Logger
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+#if DEBUG
+            .WriteTo.Console()
+#endif
+            .WriteTo.File(
+                path: logFilePath,
+                rollingInterval: RollingInterval.Day, // Creates scribblebot-20260725.log
+                retainedFileCountLimit: 14,            // Keep 2 weeks of logs
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"
+            )
+            .CreateLogger();
+
         var builder = Host.CreateApplicationBuilder(e.Args);
 
-        //Setup Logging
-        builder.Logging.ClearProviders();
-        builder.Logging.AddDebug();
-        builder.Logging.AddConsole();
-
-
         //Grab settings from appsettings.json
+        builder.Services.AddSerilog();
         builder.Services.AddOptions<OllamaSettings>()
             .BindConfiguration("OllamaSettings")
             .ValidateOnStart();
@@ -80,7 +97,6 @@ public partial class App : Application
         // Launch Main Window
         var mainWindow = _host.Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
-
         _ = WarmupModelAsync();
     }
 
@@ -163,12 +179,12 @@ public partial class App : Application
         catch
         {           
         }
-
         if (_host is not null)
         {
             await _host.StopAsync();
             _host.Dispose();
         }
+        Log.CloseAndFlush();
         base.OnExit(e);
     }
 }

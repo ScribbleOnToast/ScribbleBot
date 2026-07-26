@@ -12,8 +12,8 @@ namespace ScribbleBot.Services
     public class IntentRouter : IIntentRouter
     {
         private readonly IChatClient _chatClient;
-        private readonly ILogger _logger;
-        public IntentRouter(IChatClient chatClient, ILogger logger)
+        private readonly ILogger<IntentRouter> _logger;
+        public IntentRouter(IChatClient chatClient, ILogger<IntentRouter> logger)
         {
             _chatClient = chatClient;
             _logger = logger;
