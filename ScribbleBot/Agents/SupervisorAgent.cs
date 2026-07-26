@@ -207,7 +207,7 @@ namespace ScribbleBot.Agents
                     new ChatMessageEntity
                     {
                         ThreadId = _state.CurrentThread.Id,
-                        Role = "asssitant",
+                        Role = "assistant",
                         Timestamp = DateTime.Now,
                         RichContentJson = ChatMessageSerializer.SerializeContents(botResponse.Messages.Last().Contents)
                     });
