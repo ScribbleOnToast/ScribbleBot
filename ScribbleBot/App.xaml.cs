@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OllamaSharp;
 using ScribbleBot.Agents;
@@ -8,6 +9,7 @@ using ScribbleBot.Agents.Tools;
 using ScribbleBot.Services;
 using ScribbleBot.Settings;
 using ScribbleBot.ViewModels;
+using System.Net.Http;
 using System.Windows;
 
 
@@ -24,6 +26,12 @@ public partial class App : Application
         base.OnStartup(e);
 
         var builder = Host.CreateApplicationBuilder(e.Args);
+
+        //Setup Logging
+        builder.Logging.ClearProviders();
+        builder.Logging.AddDebug();
+        builder.Logging.AddConsole();
+
 
         //Grab settings from appsettings.json
         builder.Services.AddOptions<OllamaSettings>()
@@ -50,7 +58,7 @@ public partial class App : Application
         builder.Services.AddSingleton<GoogleSearchService>();
         builder.Services.AddSingleton<CodeIndexerService>();
         builder.Services.AddSingleton<SupervisorAgent>();
-        builder.Services.AddSingleton<IntentRouter>();
+        builder.Services.AddSingleton<IIntentRouter, IntentRouter>();
         builder.Services.AddSingleton<ToolDispatcher>();
         builder.Services.AddTransient<ContextCompactor>();
 
@@ -81,11 +89,21 @@ public partial class App : Application
         var state = Services.GetRequiredService<AgentState>();
         var chatClient = Services.GetRequiredService<IChatClient>();
         var settings = Services.GetRequiredService<IOptions<OllamaSettings>>().Value;
+        var httpClient = Services.GetRequiredService<HttpClient>();
+        var logger = Services.GetRequiredService<ILogger<App>>();
 
         try
         {
             state.IsWarmingUp = true;
-            state.StatusMessage = "Warming up model...";
+            state.StatusMessage = "Verifying LLM connection...";
+            logger.LogInformation("Initiating LLM health check at {Endpoint}", settings.Endpoint);           
+
+            // Extract base address (e.g. http://localhost:11434) for the health check endpoint
+            var baseUri = new Uri(settings.Endpoint).GetLeftPart(UriPartial.Authority);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var response = await httpClient.GetAsync(baseUri, cts.Token);
+            response.EnsureSuccessStatusCode();
+            logger.LogInformation("LLM host reachable. Triggering model warmup for '{ModelId}'...", settings.ModelId);
 
             // Send an empty prompt with keep_alive set to load the weights into VRAM
             var options = new ChatOptions
@@ -97,12 +115,23 @@ public partial class App : Application
             };
 
             await chatClient.GetResponseAsync([new ChatMessage(ChatRole.User, " ")], options);
-
+            logger.LogInformation("Model '{ModelId}' warmed up successfully.", settings.ModelId);
             state.StatusMessage = "Ready";
+        }
+        catch (HttpRequestException hEX)
+        {
+            logger.LogError(hEX, "Warmup failed: Unable to reach Ollama {Endpoint}.", settings.Endpoint);
+            state.StatusMessage = $"Warmup failed: Unable to reach Ollama server.";
+        }
+        catch (TaskCanceledException tEX)
+        {
+            logger.LogError(tEX, "Warmup failed: Ollama connection timed out at endpoint {Endpoint} (5s).", settings.Endpoint);
+            state.StatusMessage = "Ollama connection timed out after 5 seconds.";
         }
         catch (Exception ex)
         {
-            state.StatusMessage = $"Warmup failed: {ex.Message}";
+            logger.LogError(ex, "Warmup failed: An unexpected error occurred during model warmup.");
+            state.StatusMessage = $"Warmup failed: An unexpected error occurred.";
         }
         finally
         {

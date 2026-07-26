@@ -34,7 +34,7 @@
 
 	<!-- MarkdownViewer (for fixing annoying colors in code blocks -->
 	<Style TargetType="{x:Type Run}" x:Key="{x:Static md:Styles.CodeStyleKey}">
-		<Setter Property="Background" Value="#404040"/>
+		<Setter Property="Background" Value="#1E1E1E"/>
 		<Setter Property="Foreground" Value="#F1F1F1"/>
 		<Setter Property="FontFamily" Value="Consolas"/>
 	</Style>

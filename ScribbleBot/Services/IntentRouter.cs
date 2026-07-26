@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using ScribbleBot.Agents;
 using System;
 using System.Collections.Generic;
@@ -8,16 +9,17 @@ using System.Threading.Tasks;
 
 namespace ScribbleBot.Services
 {
-    public class IntentRouter
+    public class IntentRouter : IIntentRouter
     {
         private readonly IChatClient _chatClient;
-
-        public IntentRouter(IChatClient chatClient)
+        private readonly ILogger _logger;
+        public IntentRouter(IChatClient chatClient, ILogger logger)
         {
             _chatClient = chatClient;
+            _logger = logger;
         }
 
-        public async Task<string> DetermineBestAgentAsync(string userMessage, IEnumerable<IWorkerAgent> availableAgents)
+        public async Task<string> DetermineBestAgentAsync(string userMessage, IEnumerable<AgentDescriptor> availableAgents)
         {
             var agentCapabilities = availableAgents.Select(a => new
             {
@@ -25,27 +27,25 @@ namespace ScribbleBot.Services
                 Description = a.Description
             });
 
-            //Should we move this into the SystemPromptFactory? It is a bit of a different use case than the other system prompts,
-            //but it could be useful to have a dedicated system prompt for intent routing.
             string prompt = SystemPromptFactory.CreateIntentRouterPrompt(userMessage, JsonSerializer.Serialize(agentCapabilities));
 
             try
             {
+                _logger.LogDebug("Routing intent for message: '{UserMessage}'", userMessage);
                 var response = await _chatClient.GetResponseAsync(prompt, new ChatOptions
                 {
                     Temperature = 0.0f // Zero temperature for deterministic classification
                 });
 
                 string selectedName = response.Text?.Trim().Trim('"', '\'') ?? "ChatWorker";
-
-                // Ensure the LLM returned a valid, registered agent name
-                return availableAgents.Any(a => a.Name.Equals(selectedName, StringComparison.OrdinalIgnoreCase))
-                    ? selectedName
-                    : "ChatWorker";
+                var matched = availableAgents.FirstOrDefault(a => a.Name.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
+                string finalSelection = matched?.Name ?? "ChatWorker";
+                _logger.LogInformation("Intent routed to agent: '{SelectedAgent}' (LLM response: '{RawResponse}')", finalSelection, response.Text);
+                return finalSelection;
             }
-            catch
+            catch(Exception ex)
             {
-                // Fallback to default worker on network/model error
+                _logger.LogError(ex, "Failed to classify intent via LLM. Falling back to default 'ChatWorker'.");
                 return "ChatWorker";
             }
         }

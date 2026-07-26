@@ -24,7 +24,6 @@ namespace ScribbleBot.Services
                 throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
             }
 
-            // Infer project name from directory if not explicitly provided
             string projectName = new DirectoryInfo(directoryPath).Name;
 
             await _dbService.ClearProjectSymbolsAsync(projectName);

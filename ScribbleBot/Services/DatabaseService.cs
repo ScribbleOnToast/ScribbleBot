@@ -1,34 +1,451 @@
 ﻿using Microsoft.Data.Sqlite;
 using ScribbleBot.Models;
 using System.IO;
+using Microsoft.Extensions.Logging;
 
 namespace ScribbleBot.Services;
 
 public class DatabaseService
 {
-    private readonly string _connectionString;
+    private readonly ILogger<DatabaseService> _logger;
+    private readonly string dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScribbleBot");
+    private readonly string dbFile = "scribble.db";
+    private string _connectionString;
 
-    public DatabaseService()
+    public bool IsAvailable { get; private set; } = false;
+    public DatabaseService(ILogger<DatabaseService> logger)
     {
-        var appDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "ScribbleBot"
-        );
-        Directory.CreateDirectory(appDataFolder);
-
-        var dbPath = Path.Combine(appDataFolder, "scribble.db");
-        _connectionString = $"Data Source={dbPath};";
-
-        InitializeDatabase();
+        _logger = logger;
+        Directory.CreateDirectory(dbPath);        
+        _connectionString = $"Data Source={Path.Combine(dbPath, dbFile)};";
     }
 
-    private void InitializeDatabase()
+    public async Task InitializeAsync()
     {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        _logger.LogInformation("Validating database state...");
+        bool isFirstRun = !File.Exists(Path.Combine(dbPath, dbFile));
 
-        var command = connection.CreateCommand();
-        command.CommandText = @"
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            // Run schema creation (CREATE TABLE IF NOT EXISTS...)
+            var command = connection.CreateCommand();
+            command.CommandText = GetSchemaSql();
+            await command.ExecuteNonQueryAsync();
+
+            IsAvailable = true;
+
+            if (isFirstRun)
+            {
+                _logger.LogInformation("First run detected. Created new database at {Path}", dbPath);
+            }
+            else
+            {
+                _logger.LogInformation("Connected to existing database.");
+            }
+        }
+        catch (Exception ex)
+        {
+            IsAvailable = false;
+            _logger.LogError(ex, "Failed to connect to or initialize SQLite database.");
+        }
+    }
+    
+    #region Thread & Message Operations
+    public async Task<List<ChatThreadModel>> GetAllThreadsAsync()
+    {
+        _logger.LogInformation("Fetching all chat threads from the database.");
+        var threads = new List<ChatThreadModel>();
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT id, title, created_at, last_updated_at, system_summary FROM threads ORDER BY last_updated_at DESC;";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                threads.Add(new ChatThreadModel
+                {
+                    Id = reader.GetString(0),
+                    Title = reader.GetString(1),
+                    CreatedAt = DateTime.Parse(reader.GetString(2)),
+                    LastUpdatedAt = DateTime.Parse(reader.GetString(3)),
+                    SystemSummary = reader.IsDBNull(4) ? string.Empty : reader.GetString(4)
+                });
+            }
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError($"{ex.Message}, Failed to retrieve thread list");
+        }
+        return threads;
+    }
+
+    public async Task SaveThreadAsync(ChatThreadModel thread)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = @"
+            INSERT INTO threads (id, title, created_at, last_updated_at, system_summary)
+            VALUES ($id, $title, $created_at, $last_updated_at, $system_summary)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                last_updated_at = excluded.last_updated_at,
+                system_summary = excluded.system_summary;
+        ";
+            command.Parameters.AddWithValue("$id", thread.Id);
+            command.Parameters.AddWithValue("$title", thread.Title);
+            command.Parameters.AddWithValue("$created_at", thread.CreatedAt.ToString("o"));
+            command.Parameters.AddWithValue("$last_updated_at", DateTime.Now.ToString("o"));
+            command.Parameters.AddWithValue("$system_summary", thread.SystemSummary ?? (object)DBNull.Value);
+
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save thread");
+        }
+    }
+
+    public async Task AddMessageAsync(string threadId, ChatMessageModel message)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var transaction = connection.BeginTransaction();
+
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"
+            INSERT INTO messages (thread_id, role, content, timestamp)
+            VALUES ($threadId, $role, $content, $timestamp);
+
+            UPDATE threads SET last_updated_at = $timestamp WHERE id = $threadId;
+            ";
+            command.Parameters.AddWithValue("$threadId", threadId);
+            command.Parameters.AddWithValue("$role", message.Role);
+            command.Parameters.AddWithValue("$content", message.Content);
+            command.Parameters.AddWithValue("$timestamp", message.Timestamp.ToString("o"));
+
+            await command.ExecuteNonQueryAsync();
+            await transaction.CommitAsync();
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save message");
+        }
+    }
+
+    public async Task<List<ChatMessageModel>> GetMessagesForThreadAsync(string threadId)
+    {
+
+        var messages = new List<ChatMessageModel>();
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT role, content, timestamp FROM messages WHERE thread_id = $threadId ORDER BY id ASC;";
+            command.Parameters.AddWithValue("$threadId", threadId);
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                messages.Add(new ChatMessageModel
+                {
+                    Role = reader.GetString(0),
+                    Content = reader.GetString(1),
+                    Timestamp = DateTime.Parse(reader.GetString(2))
+                });
+            }
+        }
+        catch (Exception ex) 
+        {
+            _logger.LogError(ex, "Failed to retrieve Messages for thread {threadId}", threadId);
+        }
+        return messages;
+    }
+
+    public async Task DeleteThreadAsync(string threadId)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM threads WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", threadId);
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete thread {id}", threadId);
+        }
+    }
+
+    public async Task UpdateThreadSummaryAsync(string threadId, string summary)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = @"
+                UPDATE threads 
+                SET system_summary = $summary, last_updated_at = $updatedAt 
+                WHERE id = $id;";
+
+            command.Parameters.AddWithValue("$summary", summary);
+            command.Parameters.AddWithValue("$updatedAt", DateTime.Now.ToString("o"));
+            command.Parameters.AddWithValue("$id", threadId);
+
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update thread summary for thread {id}", threadId);
+        }
+    }
+    #endregion
+
+    #region Code Symbol Structural Map Operations
+    public async Task SaveCodeSymbolsAsync(IEnumerable<CodeSymbolModel> symbols, string projectName)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"
+            INSERT INTO code_symbols (id, project_name, file_path, symbol_type, symbol_name, signature, start_line, end_line, content)
+            VALUES ($id, $projectName, $filePath, $symbolType, $symbolName, $signature, $startLine, $endLine, $content)
+            ON CONFLICT(id) DO UPDATE SET
+                project_name = excluded.project_name,
+                file_path = excluded.file_path,
+                symbol_type = excluded.symbol_type,
+                symbol_name = excluded.symbol_name,
+                signature = excluded.signature,
+                start_line = excluded.start_line,
+                end_line = excluded.end_line,
+                content = excluded.content;
+                ";
+
+            var pId = command.Parameters.Add("$id", SqliteType.Text);
+            var pProject = command.Parameters.Add("$projectName", SqliteType.Text);
+            var pPath = command.Parameters.Add("$filePath", SqliteType.Text);
+            var pType = command.Parameters.Add("$symbolType", SqliteType.Text);
+            var pName = command.Parameters.Add("$symbolName", SqliteType.Text);
+            var pSig = command.Parameters.Add("$signature", SqliteType.Text);
+            var pStart = command.Parameters.Add("$startLine", SqliteType.Integer);
+            var pEnd = command.Parameters.Add("$endLine", SqliteType.Integer);
+            var pContent = command.Parameters.Add("$content", SqliteType.Text);
+
+            foreach (var symbol in symbols)
+            {
+                pId.Value = symbol.Id;
+                pProject.Value = projectName;
+                pPath.Value = symbol.FilePath;
+                pType.Value = symbol.SymbolType;
+                pName.Value = symbol.SymbolName;
+                pSig.Value = symbol.Signature ?? (object)DBNull.Value;
+                pStart.Value = symbol.StartLine;
+                pEnd.Value = symbol.EndLine;
+                pContent.Value = symbol.Content ?? (object)DBNull.Value;
+
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save code symbols for project {project}", projectName);
+        }
+    }
+
+    public async Task<List<CodeSymbolModel>> SearchSymbolsFtsAsync(string queryTerm, string? projectName = null)
+    {
+        var results = new List<CodeSymbolModel>();
+
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            if (!string.IsNullOrEmpty(projectName))
+            {
+                command.CommandText = @"
+            SELECT cs.id, cs.project_name, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
+            FROM code_symbols_fts fts
+            JOIN code_symbols cs ON fts.rowid = cs.rowid
+            WHERE code_symbols_fts MATCH $query AND cs.project_name = $projectName
+            LIMIT 20;";
+                command.Parameters.AddWithValue("$projectName", projectName);
+            }
+            else
+            {
+                command.CommandText = @"
+            SELECT cs.id, cs.project_name, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
+            FROM code_symbols_fts fts
+            JOIN code_symbols cs ON fts.rowid = cs.rowid
+            WHERE code_symbols_fts MATCH $query
+            LIMIT 20;";
+            }
+            command.Parameters.AddWithValue("$query", queryTerm);
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new CodeSymbolModel
+                {
+                    Id = reader.GetString(0),
+                    FilePath = reader.GetString(1),
+                    SymbolType = reader.GetString(2),
+                    SymbolName = reader.GetString(3),
+                    Signature = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    StartLine = reader.GetInt32(5),
+                    EndLine = reader.GetInt32(6),
+                    Content = reader.IsDBNull(7) ? null : reader.GetString(7)
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve code symbols for query: {query}", queryTerm);
+        }
+        return results;
+    }
+    #endregion
+
+    #region Review Items Operations
+    public async Task SaveReviewItemsAsync(IEnumerable<ReviewItemModel> items, string projectName)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"
+            INSERT INTO review_items (id, project_name, file_path, target_symbol, category, severity, issue_description, suggested_fix, status, created_at)
+            VALUES ($id, $projectName, $filePath, $targetSymbol, $category, $severity, $issueDescription, $suggestedFix, $status, $createdAt)
+            ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status;
+        ";
+
+            var pId = command.Parameters.Add("$id", SqliteType.Text);
+            var pProject = command.Parameters.Add("$projectName", SqliteType.Text);
+            var pPath = command.Parameters.Add("$filePath", SqliteType.Text);
+            var pSym = command.Parameters.Add("$targetSymbol", SqliteType.Text);
+            var pCat = command.Parameters.Add("$category", SqliteType.Text);
+            var pSev = command.Parameters.Add("$severity", SqliteType.Text);
+            var pDesc = command.Parameters.Add("$issueDescription", SqliteType.Text);
+            var pFix = command.Parameters.Add("$suggestedFix", SqliteType.Text);
+            var pStat = command.Parameters.Add("$status", SqliteType.Text);
+            var pCreated = command.Parameters.Add("$createdAt", SqliteType.Text);
+
+            foreach (var item in items)
+            {
+                pId.Value = item.Id;
+                pProject.Value = projectName;
+                pPath.Value = item.FilePath;
+                pSym.Value = item.TargetSymbol ?? (object)DBNull.Value;
+                pCat.Value = item.Category;
+                pSev.Value = item.Severity;
+                pDesc.Value = item.IssueDescription;
+                pFix.Value = item.SuggestedFix;
+                pStat.Value = item.Status;
+                pCreated.Value = item.CreatedAt.ToString("o");
+
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save review items for project: {project}", projectName);
+        }
+    }
+
+    public async Task<List<ReviewItemModel>> GetPendingReviewItemsAsync()
+    {
+        var items = new List<ReviewItemModel>();
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT id, file_path, target_symbol, category, severity, issue_description, suggested_fix, status, created_at FROM review_items WHERE status = 'Pending' ORDER BY created_at DESC;";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                items.Add(new ReviewItemModel
+                {
+                    Id = reader.GetString(0),
+                    FilePath = reader.GetString(1),
+                    TargetSymbol = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    Category = reader.GetString(3),
+                    Severity = reader.GetString(4),
+                    IssueDescription = reader.GetString(5),
+                    SuggestedFix = reader.GetString(6),
+                    Status = reader.GetString(7),
+                    CreatedAt = DateTime.Parse(reader.GetString(8))
+                });
+            }
+        }
+        catch(Exception ex) 
+        {
+            _logger.LogError(ex, "Failed to retrieve pending review items");
+        }
+
+        return items;
+    }
+
+    public async Task ClearProjectSymbolsAsync(string projectName)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM code_symbols WHERE project_name = $projectName;";
+            command.Parameters.AddWithValue("$projectName", projectName);
+
+            await command.ExecuteNonQueryAsync();
+        }
+        catch(Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete pending review items for project: {project}", projectName);
+        }
+    }
+
+    public string GetSchemaSql()
+    {
+        return @"
             PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS threads (
@@ -103,320 +520,7 @@ public class DatabaseService
                 created_at TEXT NOT NULL
             );
         ";
-        command.ExecuteNonQuery();
     }
 
-    #region Thread & Message Operations
-    public async Task<List<ChatThreadModel>> GetAllThreadsAsync()
-    {
-        var threads = new List<ChatThreadModel>();
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, title, created_at, last_updated_at, system_summary FROM threads ORDER BY last_updated_at DESC;";
-
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            threads.Add(new ChatThreadModel
-            {
-                Id = reader.GetString(0),
-                Title = reader.GetString(1),
-                CreatedAt = DateTime.Parse(reader.GetString(2)),
-                LastUpdatedAt = DateTime.Parse(reader.GetString(3)),
-                SystemSummary = reader.IsDBNull(4) ? string.Empty : reader.GetString(4)
-            });
-        }
-
-        return threads;
-    }
-
-    public async Task SaveThreadAsync(ChatThreadModel thread)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = @"
-            INSERT INTO threads (id, title, created_at, last_updated_at, system_summary)
-            VALUES ($id, $title, $created_at, $last_updated_at, $system_summary)
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                last_updated_at = excluded.last_updated_at,
-                system_summary = excluded.system_summary;
-        ";
-        command.Parameters.AddWithValue("$id", thread.Id);
-        command.Parameters.AddWithValue("$title", thread.Title);
-        command.Parameters.AddWithValue("$created_at", thread.CreatedAt.ToString("o"));
-        command.Parameters.AddWithValue("$last_updated_at", DateTime.Now.ToString("o"));
-        command.Parameters.AddWithValue("$system_summary", thread.SystemSummary ?? (object)DBNull.Value);
-
-        await command.ExecuteNonQueryAsync();
-    }
-
-    public async Task AddMessageAsync(string threadId, ChatMessageModel message)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        using var transaction = connection.BeginTransaction();
-
-        var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = @"
-            INSERT INTO messages (thread_id, role, content, timestamp)
-            VALUES ($threadId, $role, $content, $timestamp);
-
-            UPDATE threads SET last_updated_at = $timestamp WHERE id = $threadId;
-        ";
-        command.Parameters.AddWithValue("$threadId", threadId);
-        command.Parameters.AddWithValue("$role", message.Role);
-        command.Parameters.AddWithValue("$content", message.Content);
-        command.Parameters.AddWithValue("$timestamp", message.Timestamp.ToString("o"));
-
-        await command.ExecuteNonQueryAsync();
-        await transaction.CommitAsync();
-    }
-
-    public async Task<List<ChatMessageModel>> GetMessagesForThreadAsync(string threadId)
-    {
-        var messages = new List<ChatMessageModel>();
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = "SELECT role, content, timestamp FROM messages WHERE thread_id = $threadId ORDER BY id ASC;";
-        command.Parameters.AddWithValue("$threadId", threadId);
-
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            messages.Add(new ChatMessageModel
-            {
-                Role = reader.GetString(0),
-                Content = reader.GetString(1),
-                Timestamp = DateTime.Parse(reader.GetString(2))
-            });
-        }
-
-        return messages;
-    }
-
-    public async Task DeleteThreadAsync(string threadId)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM threads WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", threadId);
-        await command.ExecuteNonQueryAsync();
-    }
-
-    public async Task UpdateThreadSummaryAsync(string threadId, string summary)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = @"
-        UPDATE threads 
-        SET system_summary = $summary, last_updated_at = $updatedAt 
-        WHERE id = $id;";
-
-        command.Parameters.AddWithValue("$summary", summary);
-        command.Parameters.AddWithValue("$updatedAt", DateTime.Now.ToString("o"));
-        command.Parameters.AddWithValue("$id", threadId);
-
-        await command.ExecuteNonQueryAsync();
-    }
-    #endregion
-
-    #region Code Symbol Structural Map Operations
-    public async Task SaveCodeSymbolsAsync(IEnumerable<CodeSymbolModel> symbols, string projectName)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-        using var transaction = connection.BeginTransaction();
-
-        var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = @"
-            INSERT INTO code_symbols (id, project_name, file_path, symbol_type, symbol_name, signature, start_line, end_line, content)
-            VALUES ($id, $projectName, $filePath, $symbolType, $symbolName, $signature, $startLine, $endLine, $content)
-            ON CONFLICT(id) DO UPDATE SET
-                project_name = excluded.project_name,
-                file_path = excluded.file_path,
-                symbol_type = excluded.symbol_type,
-                symbol_name = excluded.symbol_name,
-                signature = excluded.signature,
-                start_line = excluded.start_line,
-                end_line = excluded.end_line,
-                content = excluded.content;
-        ";
-
-        var pId = command.Parameters.Add("$id", SqliteType.Text);
-        var pProject = command.Parameters.Add("$projectName", SqliteType.Text);
-        var pPath = command.Parameters.Add("$filePath", SqliteType.Text);
-        var pType = command.Parameters.Add("$symbolType", SqliteType.Text);
-        var pName = command.Parameters.Add("$symbolName", SqliteType.Text);
-        var pSig = command.Parameters.Add("$signature", SqliteType.Text);
-        var pStart = command.Parameters.Add("$startLine", SqliteType.Integer);
-        var pEnd = command.Parameters.Add("$endLine", SqliteType.Integer);
-        var pContent = command.Parameters.Add("$content", SqliteType.Text);
-
-        foreach (var symbol in symbols)
-        {
-            pId.Value = symbol.Id;
-            pProject.Value = projectName;
-            pPath.Value = symbol.FilePath;
-            pType.Value = symbol.SymbolType;
-            pName.Value = symbol.SymbolName;
-            pSig.Value = symbol.Signature ?? (object)DBNull.Value;
-            pStart.Value = symbol.StartLine;
-            pEnd.Value = symbol.EndLine;
-            pContent.Value = symbol.Content ?? (object)DBNull.Value;
-
-            await command.ExecuteNonQueryAsync();
-        }
-
-        await transaction.CommitAsync();
-    }
-
-    public async Task<List<CodeSymbolModel>> SearchSymbolsFtsAsync(string queryTerm, string? projectName = null)
-    {
-        var results = new List<CodeSymbolModel>();
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        if (!string.IsNullOrEmpty(projectName))
-        {
-            command.CommandText = @"
-            SELECT cs.id, cs.project_name, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
-            FROM code_symbols_fts fts
-            JOIN code_symbols cs ON fts.rowid = cs.rowid
-            WHERE code_symbols_fts MATCH $query AND cs.project_name = $projectName
-            LIMIT 20;";
-            command.Parameters.AddWithValue("$projectName", projectName);
-        }
-        else
-        {
-            command.CommandText = @"
-            SELECT cs.id, cs.project_name, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
-            FROM code_symbols_fts fts
-            JOIN code_symbols cs ON fts.rowid = cs.rowid
-            WHERE code_symbols_fts MATCH $query
-            LIMIT 20;";
-        }
-        command.Parameters.AddWithValue("$query", queryTerm);
-
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            results.Add(new CodeSymbolModel
-            {
-                Id = reader.GetString(0),
-                FilePath = reader.GetString(1),
-                SymbolType = reader.GetString(2),
-                SymbolName = reader.GetString(3),
-                Signature = reader.IsDBNull(4) ? null : reader.GetString(4),
-                StartLine = reader.GetInt32(5),
-                EndLine = reader.GetInt32(6),
-                Content = reader.IsDBNull(7) ? null : reader.GetString(7)
-            });
-        }
-
-        return results;
-    }
-    #endregion
-
-    #region Review Items Operations
-    public async Task SaveReviewItemsAsync(IEnumerable<ReviewItemModel> items, string projectName)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-        using var transaction = connection.BeginTransaction();
-
-        var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = @"
-            INSERT INTO review_items (id, project_name, file_path, target_symbol, category, severity, issue_description, suggested_fix, status, created_at)
-            VALUES ($id, $projectName, $filePath, $targetSymbol, $category, $severity, $issueDescription, $suggestedFix, $status, $createdAt)
-            ON CONFLICT(id) DO UPDATE SET
-                status = excluded.status;
-        ";
-
-        var pId = command.Parameters.Add("$id", SqliteType.Text);
-        var pProject = command.Parameters.Add("$projectName", SqliteType.Text);
-        var pPath = command.Parameters.Add("$filePath", SqliteType.Text);
-        var pSym = command.Parameters.Add("$targetSymbol", SqliteType.Text);
-        var pCat = command.Parameters.Add("$category", SqliteType.Text);
-        var pSev = command.Parameters.Add("$severity", SqliteType.Text);
-        var pDesc = command.Parameters.Add("$issueDescription", SqliteType.Text);
-        var pFix = command.Parameters.Add("$suggestedFix", SqliteType.Text);
-        var pStat = command.Parameters.Add("$status", SqliteType.Text);
-        var pCreated = command.Parameters.Add("$createdAt", SqliteType.Text);
-
-        foreach (var item in items)
-        {
-            pId.Value = item.Id;
-            pProject.Value = projectName;
-            pPath.Value = item.FilePath;
-            pSym.Value = item.TargetSymbol ?? (object)DBNull.Value;
-            pCat.Value = item.Category;
-            pSev.Value = item.Severity;
-            pDesc.Value = item.IssueDescription;
-            pFix.Value = item.SuggestedFix;
-            pStat.Value = item.Status;
-            pCreated.Value = item.CreatedAt.ToString("o");
-
-            await command.ExecuteNonQueryAsync();
-        }
-
-        await transaction.CommitAsync();
-    }
-
-    public async Task<List<ReviewItemModel>> GetPendingReviewItemsAsync()
-    {
-        var items = new List<ReviewItemModel>();
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, file_path, target_symbol, category, severity, issue_description, suggested_fix, status, created_at FROM review_items WHERE status = 'Pending' ORDER BY created_at DESC;";
-
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            items.Add(new ReviewItemModel
-            {
-                Id = reader.GetString(0),
-                FilePath = reader.GetString(1),
-                TargetSymbol = reader.IsDBNull(2) ? null : reader.GetString(2),
-                Category = reader.GetString(3),
-                Severity = reader.GetString(4),
-                IssueDescription = reader.GetString(5),
-                SuggestedFix = reader.GetString(6),
-                Status = reader.GetString(7),
-                CreatedAt = DateTime.Parse(reader.GetString(8))
-            });
-        }
-
-        return items;
-    }
-
-    public async Task ClearProjectSymbolsAsync(string projectName)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM code_symbols WHERE project_name = $projectName;";
-        command.Parameters.AddWithValue("$projectName", projectName);
-
-        await command.ExecuteNonQueryAsync();
-    }
     #endregion
 }

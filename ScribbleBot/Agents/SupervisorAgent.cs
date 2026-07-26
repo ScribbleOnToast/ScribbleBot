@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using ScribbleBot.Models;
 using ScribbleBot.Services;
 
@@ -15,7 +16,8 @@ namespace ScribbleBot.Agents
         private readonly DatabaseService _dbService;
         private readonly AgentState _state;
         private readonly ContextCompactor _compactor;
-        private readonly IntentRouter _router;
+        private readonly IIntentRouter _router;
+        private readonly ILogger<SupervisorAgent> _logger;
 
         /// <summary>
         /// Creates a new SupervisorAgent.
@@ -24,29 +26,14 @@ namespace ScribbleBot.Agents
         /// <param name="dbService">Service for persisting and retrieving threads and messages.</param>
         /// <param name="state">Shared application state for threads, messages and UI flags.</param>
         /// <param name="compactor">Component responsible for segmenting and summarizing history.</param>
-        public SupervisorAgent(IEnumerable<IWorkerAgent> agents, DatabaseService dbService, AgentState state, ContextCompactor compactor, IntentRouter router)
+        public SupervisorAgent(IEnumerable<IWorkerAgent> agents, DatabaseService dbService, AgentState state, ContextCompactor compactor, IIntentRouter router, ILogger<SupervisorAgent> logger)
         {
             _agents = agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
             _dbService = dbService;
             _state = state;
             _compactor = compactor;
             _router = router;
-        }
-
-        /// <summary>
-        /// Resolves the best worker agent for the given user request.
-        /// Defaults to "ChatWorker" if no specialized agent matches.
-        /// </summary>
-        private async Task<IWorkerAgent> PickAgentForMessageAsync(string userMessage)
-        {
-            string targetAgentName = await _router.DetermineBestAgentAsync(userMessage, _agents.Values);
-
-            if (_agents.TryGetValue(targetAgentName, out var agent))
-            {
-                return agent;
-            }
-
-            return _agents["ChatWorker"];
+            _logger = logger;
         }
 
         /// <summary>
@@ -55,6 +42,22 @@ namespace ScribbleBot.Agents
         /// </summary>
         public async Task InitializeAsync()
         {
+            _logger.LogInformation("Initializing Supervisor Agent");
+            await _dbService.InitializeAsync();
+            if (!_dbService.IsAvailable)
+            {
+                _logger.LogCritical("Database is unavailable. Halting initialization.");
+
+                System.Windows.MessageBox.Show(
+                    "ScribbleBot cannot start because the local database is unavailable.",
+                    "Critical Error",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+
+                System.Windows.Application.Current.Shutdown();
+                return;
+            }
+
             var savedThreads = await _dbService.GetAllThreadsAsync();
             _state.Threads.Clear();
 
@@ -74,11 +77,33 @@ namespace ScribbleBot.Agents
         }
 
         /// <summary>
+        /// Resolves the best worker agent for the given user request.
+        /// Defaults to "ChatWorker" if no specialized agent matches.
+        /// </summary>
+        private async Task<IWorkerAgent> PickAgentForMessageAsync(string userMessage)
+        {
+            _logger.LogInformation("Selecting agent for message: {Message}", userMessage);
+            var descriptors = _agents.Values.Select(a => new AgentDescriptor(a.Name, a.Description));
+            string targetAgentName = await _router.DetermineBestAgentAsync(userMessage, descriptors);
+
+            if (_agents.TryGetValue(targetAgentName, out var agent))
+            {
+                _logger.LogInformation("Selected agent: {AgentName}", agent.Name);
+                return agent;
+            }
+            _logger.LogWarning("No matching agent found for message. Defaulting to ChatWorker.");
+            return _agents["ChatWorker"];
+        }
+
+
+
+        /// <summary>
         /// Creates and persists a new chat thread, inserts it into the state list,
         /// and switches the UI context to the new thread.
         /// </summary>
         public async Task CreateNewThreadAsync()
         {
+            _logger.LogInformation("Creating new chat thread");
             var newThread = new ChatThreadModel
             {
                 Id = Guid.NewGuid().ToString(),
@@ -100,6 +125,7 @@ namespace ScribbleBot.Agents
         /// <param name="thread">Thread to switch to. If null, the call is ignored.</param>
         public async Task SwitchThreadAsync(ChatThreadModel? thread)
         {
+            _logger.LogInformation("Switching to thread: {ThreadTitle}", thread?.Title ?? "null");
             if (thread == null) return;
 
             _state.CurrentThread = thread;
@@ -123,9 +149,10 @@ namespace ScribbleBot.Agents
 
                 allAiMessages.Add(new ChatMessage(role, msg.Content));
             }
-
+            _logger.LogInformation("Loaded {MessageCount} messages for thread.", allAiMessages.Count);
             var (activeWindow, _) = _compactor.SegmentHistory(allAiMessages);
 
+            _logger.LogInformation("Hydrating thread with {ActiveCount} active messages.", activeWindow.Count);
             foreach (var activeMsg in activeWindow)
             {
                 _state.Messages.Add(activeMsg);
@@ -146,13 +173,11 @@ namespace ScribbleBot.Agents
 
             var now = DateTime.Now;
 
-            // Add user message to thread memory and persist to DB
             _state.Messages.Add(new ChatMessage(ChatRole.User, userMessage));
             var userMsgModel = new ChatMessageModel { Role = "user", Content = userMessage, Timestamp = now };
             _state.ActiveMessages.Add(userMsgModel);
             await _dbService.AddMessageAsync(_state.CurrentThread.Id, userMsgModel);
 
-            // Auto-title thread on first message
             if (_state.ActiveMessages.Count == 1 && _state.CurrentThread.Title == "New Conversation")
             {
                 _state.CurrentThread.Title = userMessage.Length > 25 ? userMessage[..25] + "..." : userMessage;
@@ -166,10 +191,11 @@ namespace ScribbleBot.Agents
                 _state.StatusMessage = $"{worker.Name}: Processing..."; 
                 string summary = _state.CurrentThread.SystemSummary ?? string.Empty;
 
-                // Send message history and system summary to the worker for processing
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 string botResponse = await worker.ProcessAsync(_state.Messages, summary);
+                stopwatch.Stop();
+                _logger.LogInformation("Worker {WorkerName} completed request in {ElapsedMs}ms", worker.Name, stopwatch.ElapsedMilliseconds);
 
-                // 3. Update memory & UI
                 _state.Messages.Add(new ChatMessage(ChatRole.Assistant, botResponse));
                 var botMsgModel = new ChatMessageModel { Role = "assistant", Content = botResponse, Timestamp = DateTime.Now };
                 _state.ActiveMessages.Add(botMsgModel);
@@ -181,6 +207,7 @@ namespace ScribbleBot.Agents
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error occurred while handling user message in thread {ThreadId}", _state.CurrentThread.Id);
                 var errorMsg = $"[Error]: {ex.Message}";
                 _state.Messages.Add(new ChatMessage(ChatRole.Assistant, errorMsg));
                 _state.ActiveMessages.Add(new ChatMessageModel { Role = "assistant", Content = errorMsg, Timestamp = DateTime.Now });
@@ -204,15 +231,14 @@ namespace ScribbleBot.Agents
 
             var (activeWindow, overflow) = _compactor.SegmentHistory(_state.Messages);
 
-            // If history exceeds active window budget, roll overflow turns into SystemSummary
             if (overflow.Any())
             {
+                _logger.LogInformation("Checkpointing memory: {OverflowCount} messages overflowed, updating system summary.", overflow.Count);
                 var updatedSummary = await _compactor.UpdateSummaryAsync(_state.CurrentThread.SystemSummary ?? string.Empty, overflow);
 
                 _state.CurrentThread.SystemSummary = updatedSummary;
                 await _dbService.UpdateThreadSummaryAsync(_state.CurrentThread.Id, updatedSummary);
 
-                // Trim in-memory Messages list down to active window only
                 _state.Messages.Clear();
                 foreach (var msg in activeWindow)
                 {
@@ -223,6 +249,7 @@ namespace ScribbleBot.Agents
 
         public async Task DeleteThreadAsync(ChatThreadModel threadToDelete)
         {
+            _logger.LogInformation("Deleting thread: {ThreadTitle}", threadToDelete?.Title ?? "null");
             if (threadToDelete == null) return;
 
             int deletedIndex = _state.Threads.IndexOf(threadToDelete);
