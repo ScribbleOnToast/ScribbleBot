@@ -10,6 +10,7 @@ using ScribbleBot.Services;
 using ScribbleBot.Settings;
 using ScribbleBot.ViewModels;
 using Serilog;
+using Serilog.Events;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
@@ -36,6 +37,8 @@ public partial class App : Application
         // Configure Serilog Logger
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning) // Silence Microsoft framework debug noise
+            .MinimumLevel.Override("System", LogEventLevel.Warning)
 #if DEBUG
             .WriteTo.Console()
 #endif
@@ -74,6 +77,7 @@ public partial class App : Application
         builder.Services.AddHttpClient<GoogleSearchService>();
         builder.Services.AddSingleton<GoogleSearchService>();
         builder.Services.AddSingleton<CodeIndexerService>();
+        builder.Services.AddSingleton<CodeQueryService>();
         builder.Services.AddSingleton<SupervisorAgent>();
         builder.Services.AddSingleton<IIntentRouter, IntentRouter>();
         builder.Services.AddSingleton<ToolDispatcher>();
@@ -82,8 +86,7 @@ public partial class App : Application
 
         // Register Agents implementing IWorkerAgent
         builder.Services.AddSingleton<IWorkerAgent, ChatWorker>();
-        builder.Services.AddSingleton<IWorkerAgent, CodeAnalysisWorker>();
-        builder.Services.AddSingleton<IWorkerAgent, CodeReviewWorker>();
+        builder.Services.AddSingleton<IWorkerAgent, CodeWorker>();
 
         // ViewModel & MainWindow
         builder.Services.AddTransient<MainViewModel>();
@@ -113,7 +116,7 @@ public partial class App : Application
         {
             state.IsWarmingUp = true;
             state.StatusMessage = "Verifying LLM connection...";
-            logger.LogInformation("Initiating LLM health check at {Endpoint}", settings.Endpoint);           
+            logger.LogInformation("Initiating LLM health check at {Endpoint}", settings.Endpoint);
 
             // Extract base address (e.g. http://localhost:11434) for the health check endpoint
             var baseUri = new Uri(settings.Endpoint).GetLeftPart(UriPartial.Authority);

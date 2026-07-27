@@ -61,10 +61,9 @@ namespace ScribbleBot.Agents
 
             var savedThreads = await _dbService.GetAllThreadsAsync();
             _state.Threads.Clear();
-
-            foreach (var thread in savedThreads)
+            for(var i = 0; i<savedThreads.Count;i++)
             {
-                _state.Threads.Add(thread);
+                _state.Threads.Add(savedThreads[i]);
             }
 
             if (_state.Threads.Any())
@@ -124,10 +123,9 @@ namespace ScribbleBot.Agents
         /// rendering. Also constructs the ChatMessage list used by the LLM.
         /// </summary>
         /// <param name="thread">Thread to switch to. If null, the call is ignored.</param>
-        public async Task SwitchThreadAsync(ChatThreadEntity? thread)
+        public async Task SwitchThreadAsync(ChatThreadEntity thread)
         {
             _logger.LogInformation("Switching to thread: {ThreadTitle}", thread?.Title ?? "null");
-            if (thread == null) return;
 
             _state.CurrentThread = thread;
             _state.Messages.Clear();

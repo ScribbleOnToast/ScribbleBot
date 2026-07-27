@@ -1,59 +1,175 @@
 ﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using ScribbleBot.Models;
 using System.IO;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.AI;
 
 namespace ScribbleBot.Services;
 
 public class DatabaseService
 {
     private readonly ILogger<DatabaseService> _logger;
-    private readonly string dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScribbleBot");
-    private readonly string dbFile = "scribble.db";
-    private string _connectionString;
+    private readonly string _dbPath;
+    private readonly string _connectionString;
 
     public bool IsAvailable { get; private set; } = false;
+
+    #region Constructor and Initialization
     public DatabaseService(ILogger<DatabaseService> logger)
     {
         _logger = logger;
-        Directory.CreateDirectory(dbPath);        
-        _connectionString = $"Data Source={Path.Combine(dbPath, dbFile)};";
+
+        string appDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScribbleBot");
+        Directory.CreateDirectory(appDataFolder);
+
+        _dbPath = Path.Combine(appDataFolder, "scribble.db");
+        _connectionString = $"Data Source={_dbPath};";
     }
 
     public async Task InitializeAsync()
     {
-        _logger.LogInformation("Validating database state...");
-        bool isFirstRun = !File.Exists(Path.Combine(dbPath, dbFile));
+        _logger.LogInformation("Initializing database at {Path}...", _dbPath);
+
+        if (!File.Exists(_dbPath))
+        {
+            _logger.LogWarning("Database file was not found. Creating a new one.");
+        }
 
         try
         {
             using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
-            // Run schema creation (CREATE TABLE IF NOT EXISTS...)
             var command = connection.CreateCommand();
             command.CommandText = GetSchemaSql();
             await command.ExecuteNonQueryAsync();
 
             IsAvailable = true;
-
-            if (isFirstRun)
-            {
-                _logger.LogInformation("First run detected. Created new database at {Path}", dbPath);
-            }
-            else
-            {
-                _logger.LogInformation("Connected to existing database.");
-            }
+            _logger.LogInformation("Database initialized successfully.");
         }
         catch (Exception ex)
         {
             IsAvailable = false;
-            _logger.LogError(ex, "Failed to connect to or initialize SQLite database.");
+            _logger.LogError(ex, "Failed to initialize or create SQLite database.");
+            throw;
         }
     }
-    
+    #endregion
+
+    #region Schema Definition
+    private static string GetSchemaSql()
+    {
+        return @"
+            PRAGMA foreign_keys = ON;
+            ------------------------------------------------
+            -- 1. Tables and Triggers for holding LLM threads and messages
+            -------------------------------------------------
+
+            CREATE TABLE IF NOT EXISTS threads (
+                id text PRIMARY KEY,
+                title text NOT NULL,
+                created_at TEXT NOT NULL,
+                last_updated_at TEXT NOT NULL,
+                system_summary TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id text NOT NULL,
+                role TEXT NOT NULL,                
+                timestamp TEXT NOT NULL,
+                content TEXT NOT NULL,
+                FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                content, 
+                content=messages, 
+                content_rowid=id
+            );
+
+            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+            END;
+
+            -------------------------------
+            -- END LLM threads and messages
+            -------------------------------
+
+            -------------------------------------------------------------------------------
+            -- 2.  Tables and Triggers for holding Source Code Analysis and Reviews
+            -- 2a. STRUCTURAL NODES (Files, Classes, Interfaces, Methods, Properties)
+            -------------------------------------------------------------------------------
+            CREATE TABLE IF NOT EXISTS code_symbols (
+                id TEXT PRIMARY KEY,
+                parent_id TEXT,               -- Self-reference (e.g., Method -> Class -> File)
+                project_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                symbol_type TEXT NOT NULL,     -- 'File', 'Class', 'Interface', 'Method', 'Property'
+                symbol_name TEXT NOT NULL,
+                signature TEXT,                -- Full declaration signature
+                start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                content TEXT,                  -- Raw source text of the symbol
+                FOREIGN KEY (parent_id) REFERENCES code_symbols(id) ON DELETE CASCADE
+            );
+
+            -------------------------------------------------------------------------------
+            -- 2b. GRAPH EDGES (Relationships & Call Graphs)
+            -------------------------------------------------------------------------------
+            CREATE TABLE IF NOT EXISTS symbol_relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id TEXT NOT NULL,        -- Caller / Implementation / Derived
+                target_id TEXT NOT NULL,        -- Callee / Interface / Base Class
+                relation_type TEXT NOT NULL,    -- 'CALLS', 'IMPLEMENTS', 'INHERITS', 'CONTAINS'
+                FOREIGN KEY (source_id) REFERENCES code_symbols(id) ON DELETE CASCADE,
+                FOREIGN KEY (target_id) REFERENCES code_symbols(id) ON DELETE CASCADE
+            );
+
+            -------------------------------------------------------------------------------
+            -- 2c. FULL-TEXT SEARCH (FTS5 Trigram Matching)
+            -------------------------------------------------------------------------------
+            CREATE VIRTUAL TABLE IF NOT EXISTS code_symbols_fts USING fts5(
+                project_name,
+                symbol_name,
+                signature,
+                content,
+                content='code_symbols',
+                tokenize='trigram'
+            );
+
+            -- Triggers to sync code_symbols with FTS index automatically
+            DROP TRIGGER IF EXISTS code_symbols_ai;
+            DROP TRIGGER IF EXISTS code_symbols_ad;
+            DROP TRIGGER IF EXISTS code_symbols_au;
+
+            CREATE TRIGGER code_symbols_ai AFTER INSERT ON code_symbols BEGIN
+                INSERT INTO code_symbols_fts(rowid, project_name, symbol_name, signature, content) 
+                VALUES (new.rowid, new.project_name, new.symbol_name, new.signature, new.content);
+            END;
+
+            CREATE TRIGGER code_symbols_ad AFTER DELETE ON code_symbols BEGIN
+                INSERT INTO code_symbols_fts(code_symbols_fts, rowid, project_name, symbol_name, signature, content) 
+                VALUES('delete', old.rowid, old.project_name, old.symbol_name, old.signature, old.content);
+            END;
+
+            CREATE TRIGGER code_symbols_au AFTER UPDATE ON code_symbols BEGIN
+                INSERT INTO code_symbols_fts(code_symbols_fts, rowid, project_name, symbol_name, signature, content) 
+                VALUES('delete', old.rowid, old.project_name, old.symbol_name, old.signature, old.content);
+                INSERT INTO code_symbols_fts(rowid, project_name, symbol_name, signature, content) 
+                VALUES (new.rowid, new.project_name, new.symbol_name, new.signature, new.content);
+            END;
+            
+            ------------------------------------------------
+            -- END Source Code Analysis and Reviews
+            ------------------------------------------------
+        ";
+    }
+    #endregion
+
     #region Thread & Message Operations
     public async Task<List<ChatThreadEntity>> GetAllThreadsAsync()
     {
@@ -223,32 +339,35 @@ public class DatabaseService
     }
     #endregion
 
-    #region Code Symbol Structural Map Operations
+    #region Code Analysis and Review Persistence Methods
     public async Task SaveCodeSymbolsAsync(IEnumerable<CodeSymbolModel> symbols, string projectName)
     {
+        if (symbols == null || !symbols.Any()) return;
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        using var transaction = connection.BeginTransaction();
+
         try
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-            using var transaction = connection.BeginTransaction();
-
             var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"
-            INSERT INTO code_symbols (id, project_name, file_path, symbol_type, symbol_name, signature, start_line, end_line, content)
-            VALUES ($id, $projectName, $filePath, $symbolType, $symbolName, $signature, $startLine, $endLine, $content)
-            ON CONFLICT(id) DO UPDATE SET
-                project_name = excluded.project_name,
-                file_path = excluded.file_path,
-                symbol_type = excluded.symbol_type,
-                symbol_name = excluded.symbol_name,
-                signature = excluded.signature,
-                start_line = excluded.start_line,
-                end_line = excluded.end_line,
-                content = excluded.content;
-                ";
+                INSERT INTO code_symbols (id, parent_id, project_name, file_path, symbol_type, symbol_name, signature, start_line, end_line, content)
+                VALUES ($id, $parentId, $projectName, $filePath, $symbolType, $symbolName, $signature, $startLine, $endLine, $content)
+                ON CONFLICT(id) DO UPDATE SET
+                    parent_id = excluded.parent_id,
+                    project_name = excluded.project_name,
+                    file_path = excluded.file_path,
+                    symbol_type = excluded.symbol_type,
+                    symbol_name = excluded.symbol_name,
+                    signature = excluded.signature,
+                    start_line = excluded.start_line,
+                    end_line = excluded.end_line,
+                    content = excluded.content;";
 
             var pId = command.Parameters.Add("$id", SqliteType.Text);
+            var pParentId = command.Parameters.Add("$parentId", SqliteType.Text);
             var pProject = command.Parameters.Add("$projectName", SqliteType.Text);
             var pPath = command.Parameters.Add("$filePath", SqliteType.Text);
             var pType = command.Parameters.Add("$symbolType", SqliteType.Text);
@@ -261,267 +380,246 @@ public class DatabaseService
             foreach (var symbol in symbols)
             {
                 pId.Value = symbol.Id;
+                pParentId.Value = (object?)symbol.ParentId ?? DBNull.Value;
                 pProject.Value = projectName;
                 pPath.Value = symbol.FilePath;
                 pType.Value = symbol.SymbolType;
                 pName.Value = symbol.SymbolName;
-                pSig.Value = symbol.Signature ?? (object)DBNull.Value;
+                pSig.Value = (object?)symbol.Signature ?? DBNull.Value;
                 pStart.Value = symbol.StartLine;
                 pEnd.Value = symbol.EndLine;
-                pContent.Value = symbol.Content ?? (object)DBNull.Value;
+                pContent.Value = (object?)symbol.Content ?? DBNull.Value;
 
                 await command.ExecuteNonQueryAsync();
             }
 
             await transaction.CommitAsync();
+            _logger.LogInformation("Saved {Count} symbols for project {Project}", symbols.Count(), projectName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to save code symbols for project {project}", projectName);
+            await transaction.RollbackAsync();
+            _logger.LogError(ex, "Failed to save code symbols for project {Project}", projectName);
+            throw;
         }
     }
 
-    public async Task<List<CodeSymbolModel>> SearchSymbolsFtsAsync(string queryTerm, string? projectName = null)
+    public async Task SaveCodeRelationshipsAsync(IEnumerable<CodeEdgeModel> edges)
     {
-        var results = new List<CodeSymbolModel>();
+        if (edges == null || !edges.Any()) return;
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        using var transaction = connection.BeginTransaction();
 
         try
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-
             var command = connection.CreateCommand();
-            if (!string.IsNullOrEmpty(projectName))
-            {
-                command.CommandText = @"
-            SELECT cs.id, cs.project_name, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
-            FROM code_symbols_fts fts
-            JOIN code_symbols cs ON fts.rowid = cs.rowid
-            WHERE code_symbols_fts MATCH $query AND cs.project_name = $projectName
-            LIMIT 20;";
-                command.Parameters.AddWithValue("$projectName", projectName);
-            }
-            else
-            {
-                command.CommandText = @"
-            SELECT cs.id, cs.project_name, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
-            FROM code_symbols_fts fts
-            JOIN code_symbols cs ON fts.rowid = cs.rowid
-            WHERE code_symbols_fts MATCH $query
-            LIMIT 20;";
-            }
-            command.Parameters.AddWithValue("$query", queryTerm);
+            command.Transaction = transaction;
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            // Insert edge ONLY if both source and target IDs exist in code_symbols
+            command.CommandText = @"
+            INSERT INTO symbol_relationships (source_id, target_id, relation_type)
+            SELECT $sourceId, $targetId, $relationType
+            WHERE EXISTS (SELECT 1 FROM code_symbols WHERE id = $sourceId)
+              AND EXISTS (SELECT 1 FROM code_symbols WHERE id = $targetId);";
+
+            var pSource = command.Parameters.Add("$sourceId", SqliteType.Text);
+            var pTarget = command.Parameters.Add("$targetId", SqliteType.Text);
+            var pRelation = command.Parameters.Add("$relationType", SqliteType.Text);
+
+            foreach (var edge in edges)
             {
-                results.Add(new CodeSymbolModel
-                {
-                    Id = reader.GetString(0),
-                    FilePath = reader.GetString(1),
-                    SymbolType = reader.GetString(2),
-                    SymbolName = reader.GetString(3),
-                    Signature = reader.IsDBNull(4) ? null : reader.GetString(4),
-                    StartLine = reader.GetInt32(5),
-                    EndLine = reader.GetInt32(6),
-                    Content = reader.IsDBNull(7) ? null : reader.GetString(7)
-                });
+                pSource.Value = edge.SourceId;
+                pTarget.Value = edge.TargetId;
+                pRelation.Value = edge.RelationType;
+
+                await command.ExecuteNonQueryAsync();
             }
+
+            await transaction.CommitAsync();
+            _logger.LogInformation("Saved relationships for valid local symbols.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve code symbols for query: {query}", queryTerm);
+            await transaction.RollbackAsync();
+            _logger.LogError(ex, "Failed to save code relationships.");
+            throw;
         }
-        return results;
+    }
+
+    public async Task ClearProjectDataAsync(string projectName)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM code_symbols WHERE project_name = $projectName;";
+        command.Parameters.AddWithValue("$projectName", projectName);
+
+        await command.ExecuteNonQueryAsync();
+        _logger.LogInformation("Cleared existing index data for project {Project}", projectName);
+    }
+
+    public async Task<List<string>> GetIndexedProjectNamesAsync()
+    {
+        var projects = new List<string>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+        SELECT DISTINCT project_name 
+        FROM code_symbols 
+        WHERE project_name IS NOT NULL AND project_name != ''
+        ORDER BY project_name;";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            projects.Add(reader.GetString(0));
+        }
+
+        return projects;
     }
     #endregion
 
-    #region Review Items Operations
-    public async Task SaveReviewItemsAsync(IEnumerable<ReviewItemModel> items, string projectName)
+    #region Code Analysis and Review Retrieval Methods
+    public async Task<List<CodeSymbolModel>> GetProjectOverviewAsync(string projectName)
     {
-        try
+        var symbols = new List<CodeSymbolModel>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var command = connection.CreateCommand();
+        // Fetch non-method structural nodes (Files, Classes, Interfaces, Configs) to build macro summary
+        command.CommandText = @"
+        SELECT id, parent_id, file_path, symbol_type, symbol_name, signature, start_line, end_line
+        FROM code_symbols 
+        WHERE project_name = $projectName AND symbol_type != 'Method'
+        ORDER BY symbol_type, symbol_name;";
+        command.Parameters.AddWithValue("$projectName", projectName);
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-            using var transaction = connection.BeginTransaction();
-
-            var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = @"
-            INSERT INTO review_items (id, project_name, file_path, target_symbol, category, severity, issue_description, suggested_fix, status, created_at)
-            VALUES ($id, $projectName, $filePath, $targetSymbol, $category, $severity, $issueDescription, $suggestedFix, $status, $createdAt)
-            ON CONFLICT(id) DO UPDATE SET
-                status = excluded.status;
-        ";
-
-            var pId = command.Parameters.Add("$id", SqliteType.Text);
-            var pProject = command.Parameters.Add("$projectName", SqliteType.Text);
-            var pPath = command.Parameters.Add("$filePath", SqliteType.Text);
-            var pSym = command.Parameters.Add("$targetSymbol", SqliteType.Text);
-            var pCat = command.Parameters.Add("$category", SqliteType.Text);
-            var pSev = command.Parameters.Add("$severity", SqliteType.Text);
-            var pDesc = command.Parameters.Add("$issueDescription", SqliteType.Text);
-            var pFix = command.Parameters.Add("$suggestedFix", SqliteType.Text);
-            var pStat = command.Parameters.Add("$status", SqliteType.Text);
-            var pCreated = command.Parameters.Add("$createdAt", SqliteType.Text);
-
-            foreach (var item in items)
+            symbols.Add(new CodeSymbolModel
             {
-                pId.Value = item.Id;
-                pProject.Value = projectName;
-                pPath.Value = item.FilePath;
-                pSym.Value = item.TargetSymbol ?? (object)DBNull.Value;
-                pCat.Value = item.Category;
-                pSev.Value = item.Severity;
-                pDesc.Value = item.IssueDescription;
-                pFix.Value = item.SuggestedFix;
-                pStat.Value = item.Status;
-                pCreated.Value = item.CreatedAt.ToString("o");
-
-                await command.ExecuteNonQueryAsync();
-            }
-
-            await transaction.CommitAsync();
+                Id = reader.GetString(0),
+                ParentId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                FilePath = reader.GetString(2),
+                SymbolType = reader.GetString(3),
+                SymbolName = reader.GetString(4),
+                Signature = reader.IsDBNull(5) ? null : reader.GetString(5),
+                StartLine = reader.GetInt32(6),
+                EndLine = reader.GetInt32(7)
+            });
         }
-        catch(Exception ex)
-        {
-            _logger.LogError(ex, "Failed to save review items for project: {project}", projectName);
-        }
+
+        return symbols;
     }
 
-    public async Task<List<ReviewItemModel>> GetPendingReviewItemsAsync()
+    public async Task<List<CodeSymbolModel>> SearchSymbolsFtsAsync(string projectName, string queryTerm, int limit = 20)
     {
-        var items = new List<ReviewItemModel>();
-        try
+        var results = new List<CodeSymbolModel>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+        SELECT cs.id, cs.parent_id, cs.file_path, cs.symbol_type, cs.symbol_name, cs.signature, cs.start_line, cs.end_line, cs.content
+        FROM code_symbols_fts fts
+        JOIN code_symbols cs ON fts.rowid = cs.rowid
+        WHERE fts.project_name = $projectName AND code_symbols_fts MATCH $query
+        LIMIT $limit;";
+
+        command.Parameters.AddWithValue("$projectName", projectName);
+        // Sanitize and format for FTS5 trigram match
+        command.Parameters.AddWithValue("$query", $"\"{queryTerm}\"");
+        command.Parameters.AddWithValue("$limit", limit);
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-
-            var command = connection.CreateCommand();
-            command.CommandText = "SELECT id, file_path, target_symbol, category, severity, issue_description, suggested_fix, status, created_at FROM review_items WHERE status = 'Pending' ORDER BY created_at DESC;";
-
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            results.Add(new CodeSymbolModel
             {
-                items.Add(new ReviewItemModel
-                {
-                    Id = reader.GetString(0),
-                    FilePath = reader.GetString(1),
-                    TargetSymbol = reader.IsDBNull(2) ? null : reader.GetString(2),
-                    Category = reader.GetString(3),
-                    Severity = reader.GetString(4),
-                    IssueDescription = reader.GetString(5),
-                    SuggestedFix = reader.GetString(6),
-                    Status = reader.GetString(7),
-                    CreatedAt = DateTime.Parse(reader.GetString(8))
-                });
-            }
-        }
-        catch(Exception ex) 
-        {
-            _logger.LogError(ex, "Failed to retrieve pending review items");
+                Id = reader.GetString(0),
+                ParentId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                FilePath = reader.GetString(2),
+                SymbolType = reader.GetString(3),
+                SymbolName = reader.GetString(4),
+                Signature = reader.IsDBNull(5) ? null : reader.GetString(5),
+                StartLine = reader.GetInt32(6),
+                EndLine = reader.GetInt32(7),
+                Content = reader.IsDBNull(8) ? null : reader.GetString(8)
+            });
         }
 
-        return items;
+        return results;
     }
 
-    public async Task ClearProjectSymbolsAsync(string projectName)
+    public async Task<CodeSymbolModel?> GetSymbolByIdOrNameAsync(string projectName, string symbolIdentifier)
     {
-        try
-        {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
 
-            var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM code_symbols WHERE project_name = $projectName;";
-            command.Parameters.AddWithValue("$projectName", projectName);
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+        SELECT id, parent_id, file_path, symbol_type, symbol_name, signature, start_line, end_line, content
+        FROM code_symbols
+        WHERE project_name = $projectName AND (id = $idOrName OR symbol_name = $idOrName)
+        LIMIT 1;";
 
-            await command.ExecuteNonQueryAsync();
-        }
-        catch(Exception ex)
+        command.Parameters.AddWithValue("$projectName", projectName);
+        command.Parameters.AddWithValue("$idOrName", symbolIdentifier);
+
+        using var reader = await command.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
         {
-            _logger.LogError(ex, "Failed to delete pending review items for project: {project}", projectName);
+            return new CodeSymbolModel
+            {
+                Id = reader.GetString(0),
+                ParentId = reader.IsDBNull(1) ? null : reader.GetString(1),
+                FilePath = reader.GetString(2),
+                SymbolType = reader.GetString(3),
+                SymbolName = reader.GetString(4),
+                Signature = reader.IsDBNull(5) ? null : reader.GetString(5),
+                StartLine = reader.GetInt32(6),
+                EndLine = reader.GetInt32(7),
+                Content = reader.IsDBNull(8) ? null : reader.GetString(8)
+            };
         }
+
+        return null;
     }
 
-    public string GetSchemaSql()
+    public async Task<List<CodeEdgeModel>> GetRelationshipsForSymbolAsync(string symbolIdOrName)
     {
-        return @"
-            PRAGMA foreign_keys = ON;
+        var edges = new List<CodeEdgeModel>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
 
-            CREATE TABLE IF NOT EXISTS threads (
-                id text PRIMARY KEY,
-                title text NOT NULL,
-                created_at TEXT NOT NULL,
-                last_updated_at TEXT NOT NULL,
-                system_summary TEXT
-            );
+        var command = connection.CreateCommand();
+        // Retrieve incoming or outgoing relationships (CALLS, IMPLEMENTS, INHERITS, USES_CODEBEHIND)
+        command.CommandText = @"
+        SELECT source_id, target_id, relation_type 
+        FROM symbol_relationships 
+        WHERE source_id = $id OR target_id = $id;";
 
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                thread_id text NOT NULL,
-                role TEXT NOT NULL,                
-                timestamp TEXT NOT NULL,
-                content TEXT NOT NULL,
-                FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
-            );
+        command.Parameters.AddWithValue("$id", symbolIdOrName);
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                content, 
-                content=messages, 
-                content_rowid=id
-            );
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            edges.Add(new CodeEdgeModel
+            {
+                SourceId = reader.GetString(0),
+                TargetId = reader.GetString(1),
+                RelationType = reader.GetString(2)
+            });
+        }
 
-            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
-            END;
-
-            -- Codebase Structural Map (AST Parsing)
-            CREATE TABLE IF NOT EXISTS code_symbols (
-                id TEXT PRIMARY KEY,
-                project_name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                symbol_type TEXT NOT NULL,
-                symbol_name TEXT NOT NULL,
-                signature TEXT,
-                start_line INTEGER,
-                end_line INTEGER,
-                content TEXT
-            );
-
-            CREATE VIRTUAL TABLE IF NOT EXISTS code_symbols_fts USING fts5(
-                project_name,
-                symbol_name,
-                signature,
-                content,
-                content=code_symbols,
-                content_rowid=rowid
-            );
-
-            CREATE TRIGGER IF NOT EXISTS code_symbols_ai AFTER INSERT ON code_symbols BEGIN
-                INSERT INTO code_symbols_fts(rowid, symbol_name, signature, content) 
-                VALUES (new.rowid, new.symbol_name, new.signature, new.content);
-            END;
-
-            -- Code Review Findings & Recommendations
-            CREATE TABLE IF NOT EXISTS review_items (
-                id TEXT PRIMARY KEY,
-                project_name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                target_symbol TEXT,
-                category TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                issue_description TEXT NOT NULL,
-                suggested_fix TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'Pending',
-                created_at TEXT NOT NULL
-            );
-        ";
+        return edges;
     }
-
     #endregion
 }
